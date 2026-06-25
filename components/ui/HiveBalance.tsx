@@ -32,7 +32,7 @@ export default function HiveBalance({ amount, showUsdt = true, size = 'lg' }: Hi
         <motion.span className={`${sizeMap[size]} font-black text-gold-gradient`}>
           {rounded}
         </motion.span>
-        <span className="text-hive-gold/70 font-bold text-lg">HIVE</span>
+        <span className="text-hive-gold/70 font-bold text-lg">🍯 HIVE</span>
       </div>
       {showUsdt && (
         <p className="text-white/40 text-sm mt-1">

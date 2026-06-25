@@ -43,6 +43,9 @@ export interface User {
   referral_code: string | null;
   referred_by: string | null;
   language: string;
+  ip_address: string | null;
+  device_fingerprint: string | null;
+  ip_flagged: boolean;
   created_at: string;
   updated_at: string;
 }

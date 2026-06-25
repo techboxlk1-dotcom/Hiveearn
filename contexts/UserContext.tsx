@@ -3,6 +3,10 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import type { User, Notification } from '@/lib/supabase';
 import { getUserByTelegramId, upsertUser, getUserNotifications, markAllNotificationsRead } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
+
+// Telegram ID that always has admin access
+const ADMIN_TELEGRAM_ID = 5419054691;
 
 interface TelegramUser {
   id: number;
@@ -54,7 +58,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     const initUser = async () => {
       setIsLoading(true);
       try {
-        // Try to get Telegram WebApp data
         let tgUser: TelegramUser | null = null;
 
         if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
@@ -74,23 +77,33 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        // Fallback for development/demo
+        // Fallback for browser preview (uses admin ID so admin panel is accessible)
         if (!tgUser) {
           tgUser = {
-            id: 5419054691,
-            username: 'hiveearndemo',
-            first_name: 'Hive',
-            last_name: 'User',
+            id: ADMIN_TELEGRAM_ID,
+            username: 'Pandatechnic',
+            first_name: 'PANDA',
+            last_name: undefined,
             photo_url: undefined,
           };
         }
 
         setTelegramUser(tgUser);
 
-        // Check URL for referral code
+        // Check for referral param
         const urlParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
         const startParam = urlParams.get('tgWebAppStartParam') || '';
         const referralCode = startParam.startsWith('ref_') ? startParam.replace('ref_', '') : undefined;
+
+        // Fetch client IP via public service (best-effort, non-blocking)
+        let ipAddress: string | undefined;
+        try {
+          const ipRes = await fetch('https://api.ipify.org?format=json');
+          if (ipRes.ok) {
+            const ipData = await ipRes.json() as { ip?: string };
+            ipAddress = ipData.ip;
+          }
+        } catch { /* ignore */ }
 
         const dbUser = await upsertUser({
           telegram_id: tgUser.id,
@@ -99,7 +112,14 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           last_name: tgUser.last_name,
           photo_url: tgUser.photo_url,
           referral_code_used: referralCode,
+          ip_address: ipAddress,
         });
+
+        // Ensure admin flag is set for the hardcoded admin Telegram ID
+        if (dbUser && tgUser.id === ADMIN_TELEGRAM_ID && !dbUser.is_admin) {
+          await supabase.from('users').update({ is_admin: true }).eq('id', dbUser.id);
+          dbUser.is_admin = true;
+        }
 
         setUser(dbUser);
       } catch (err) {
@@ -117,7 +137,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, [user, refreshNotifications]);
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
-  const isAdmin = user?.is_admin ?? false;
+
+  // Admin if DB flag OR matches hardcoded admin Telegram ID
+  const isAdmin = (user?.is_admin ?? false) || (telegramUser?.id === ADMIN_TELEGRAM_ID);
 
   return (
     <UserContext.Provider value={{ user, telegramUser, notifications, unreadCount, isLoading, isAdmin, refreshUser, refreshNotifications, markAllRead }}>

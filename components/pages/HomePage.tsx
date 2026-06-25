@@ -182,7 +182,7 @@ export default function HomePage() {
                     <p className="text-white/30 text-[10px]">{timeAgo(tx.created_at)}</p>
                   </div>
                   <span className={`font-bold text-sm ${tx.amount > 0 ? 'text-green-400' : 'text-red-400'} ${txTypeColor[tx.type]}`}>
-                    {tx.amount > 0 ? '+' : ''}{formatHive(tx.amount)} H
+                    {tx.amount > 0 ? '+' : ''}{formatHive(tx.amount)} 🍯
                   </span>
                 </div>
               ))}
@@ -220,18 +220,26 @@ export default function HomePage() {
             <h3 className="text-white/60 text-xs font-semibold uppercase tracking-widest mb-3">Community</h3>
             <div className="grid grid-cols-2 gap-3">
               <a href="https://t.me/hiveearn" target="_blank" rel="noopener noreferrer">
-                <motion.div whileTap={{ scale: 0.95 }} className="flex items-center gap-2 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
-                  <ExternalLink size={14} className="text-blue-400" />
-                  <span className="text-blue-300 text-xs font-semibold">@hiveearn</span>
+                <motion.div whileTap={{ scale: 0.95 }} className="flex flex-col items-center gap-1.5 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                  <span className="text-xl">📢</span>
+                  <span className="text-blue-300 text-xs font-semibold">Community</span>
+                  <span className="text-blue-400/60 text-[10px]">Join Channel</span>
                 </motion.div>
               </a>
               <a href="https://t.me/hiveearnpayment" target="_blank" rel="noopener noreferrer">
-                <motion.div whileTap={{ scale: 0.95 }} className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-xl">
-                  <ExternalLink size={14} className="text-green-400" />
-                  <span className="text-green-300 text-xs font-semibold">@payments</span>
+                <motion.div whileTap={{ scale: 0.95 }} className="flex flex-col items-center gap-1.5 p-3 bg-green-500/10 border border-green-500/20 rounded-xl">
+                  <span className="text-xl">💳</span>
+                  <span className="text-green-300 text-xs font-semibold">Payments</span>
+                  <span className="text-green-400/60 text-[10px]">View Proofs</span>
                 </motion.div>
               </a>
             </div>
+            <a href={`https://t.me/Hiveearnbot/play`} target="_blank" rel="noopener noreferrer" className="mt-3 block">
+              <motion.div whileTap={{ scale: 0.97 }} className="flex items-center justify-center gap-2 py-2.5 bg-hive-gold/10 border border-hive-gold/20 rounded-xl">
+                <span className="text-hive-gold text-sm">🐝</span>
+                <span className="text-hive-gold text-xs font-bold">Open Mini App</span>
+              </motion.div>
+            </a>
           </GlassCard>
         </motion.div>
       </motion.div>

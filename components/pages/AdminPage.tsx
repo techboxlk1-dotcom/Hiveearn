@@ -2,13 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, DollarSign, CheckSquare, Megaphone, Gift, Shield, BarChart2, LogOut, Plus, Check, X, Search, Edit, Trash2, Eye, ChevronLeft } from 'lucide-react';
+import { Users, DollarSign, CheckSquare, Megaphone, Gift, Shield, BarChart2, Plus, Check, X, Search, Trash2, Eye, ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import { supabase } from '@/lib/supabase';
 import type { User, Withdrawal, RewardCode, Task, Announcement, FraudLog, AdminLog } from '@/lib/supabase';
-import { getAllUsers, approveWithdrawal, rejectWithdrawal, createRewardCode, suspendUser, unsuspendUser, createAnnouncement, createTask, getAdminStats } from '@/lib/api';
+import { getAllUsers, approveWithdrawal, rejectWithdrawal, createRewardCode, suspendUser, unsuspendUser, createAnnouncement, createTask, getAdminStats, blockIp } from '@/lib/api';
 import { formatHive, formatUsdt, hiveToUsdt, timeAgo, truncateAddress } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -529,27 +529,114 @@ function AdminAnnouncements({ adminId }: { adminId: string }) {
 
 // ─── Fraud ────────────────────────────────────────────────────────────────────
 function AdminFraud() {
+  const { user } = useUser();
   const [logs, setLogs] = useState<FraudLog[]>([]);
+  const [blockedIps, setBlockedIps] = useState<Array<{ id: string; ip_address: string; reason: string; created_at: string }>>([]);
+  const [suspendedUsers, setSuspendedUsers] = useState<User[]>([]);
+  const [ipInput, setIpInput] = useState('');
+  const [ipReason, setIpReason] = useState('');
+  const [tab, setTab] = useState<'logs' | 'ips' | 'suspended'>('logs');
 
-  useEffect(() => { supabase.from('fraud_logs').select('*').order('created_at', { ascending: false }).limit(50).then(({ data }) => setLogs(data ?? [])); }, []);
+  const load = () => {
+    supabase.from('fraud_logs').select('*').order('created_at', { ascending: false }).limit(50).then(({ data }) => setLogs(data ?? []));
+    supabase.from('ip_blocks').select('*').order('created_at', { ascending: false }).then(({ data }) => setBlockedIps(data ?? []));
+    supabase.from('users').select('*').eq('is_suspended', true).order('created_at', { ascending: false }).then(({ data }) => setSuspendedUsers(data ?? []));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleBlockIp = async () => {
+    if (!user || !ipInput.trim() || !ipReason.trim()) return;
+    await blockIp(user.id, ipInput.trim(), ipReason.trim());
+    setIpInput(''); setIpReason('');
+    toast.success(`IP ${ipInput} blocked`);
+    load();
+  };
+
+  const handleUnblockIp = async (ip: string) => {
+    await supabase.from('ip_blocks').delete().eq('ip_address', ip);
+    toast.success('IP unblocked');
+    load();
+  };
+
+  const handleUnsuspend = async (u: User) => {
+    if (!user) return;
+    await unsuspendUser(user.id, u.id);
+    toast.success(`Unsuspended ${u.first_name}`);
+    load();
+  };
 
   const severityColor = { low: 'text-blue-400', medium: 'text-yellow-400', high: 'text-orange-400', critical: 'text-red-400' };
 
   return (
-    <div>
-      <GlassCard className="divide-y divide-white/[0.04] overflow-hidden" animate={false}>
-        {logs.length === 0 && <p className="text-white/30 text-xs text-center py-6">No fraud logs</p>}
-        {logs.map(log => (
-          <div key={log.id} className="p-3">
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-white/70 text-xs font-semibold capitalize">{log.type.replace('_', ' ')}</p>
-              <span className={`text-[10px] font-bold ${severityColor[log.severity]}`}>{log.severity}</span>
-            </div>
-            <p className="text-white/40 text-[10px]">{log.description ?? 'No description'}</p>
-            <p className="text-white/20 text-[9px] mt-1">{timeAgo(log.created_at)}</p>
-          </div>
+    <div className="space-y-3">
+      {/* Sub-tabs */}
+      <div className="flex gap-2 p-1 bg-white/[0.04] rounded-xl">
+        {(['logs', 'ips', 'suspended'] as const).map(t => (
+          <button key={t} onClick={() => setTab(t)} className={`flex-1 py-2 rounded-lg text-xs font-semibold capitalize transition-all ${tab === t ? 'bg-hive-gold text-black' : 'text-white/50'}`}>
+            {t === 'logs' ? `Fraud Logs` : t === 'ips' ? `Block IPs` : `Suspended`}
+          </button>
         ))}
-      </GlassCard>
+      </div>
+
+      {tab === 'logs' && (
+        <GlassCard className="divide-y divide-white/[0.04] overflow-hidden" animate={false}>
+          {logs.length === 0 && <p className="text-white/30 text-xs text-center py-6">No fraud logs</p>}
+          {logs.map(log => (
+            <div key={log.id} className="p-3">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-white/70 text-xs font-semibold capitalize">{log.type.replace(/_/g, ' ')}</p>
+                <span className={`text-[10px] font-bold ${severityColor[log.severity]}`}>{log.severity}</span>
+              </div>
+              {log.ip_address && <p className="text-white/40 text-[10px] font-mono">IP: {log.ip_address}</p>}
+              <p className="text-white/40 text-[10px]">{log.description ?? 'No description'}</p>
+              <p className="text-white/20 text-[9px] mt-1">{timeAgo(log.created_at)}</p>
+            </div>
+          ))}
+        </GlassCard>
+      )}
+
+      {tab === 'ips' && (
+        <div className="space-y-3">
+          <GlassCard className="p-4 space-y-3" animate={false}>
+            <p className="text-white/60 text-xs font-semibold uppercase tracking-widest">Block IP Address</p>
+            <input value={ipInput} onChange={e => setIpInput(e.target.value)} placeholder="e.g. 192.168.1.1" className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none font-mono" />
+            <input value={ipReason} onChange={e => setIpReason(e.target.value)} placeholder="Reason for blocking" className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none" />
+            <motion.button whileTap={{ scale: 0.96 }} onClick={handleBlockIp} disabled={!ipInput || !ipReason} className="w-full py-2.5 bg-red-500/20 border border-red-500/30 rounded-xl text-red-400 text-xs font-bold disabled:opacity-40">
+              🚫 Block IP & Suspend All Users on This IP
+            </motion.button>
+          </GlassCard>
+
+          <GlassCard className="divide-y divide-white/[0.04] overflow-hidden" animate={false}>
+            {blockedIps.length === 0 && <p className="text-white/30 text-xs text-center py-4">No blocked IPs</p>}
+            {blockedIps.map(b => (
+              <div key={b.id} className="flex items-center justify-between p-3">
+                <div>
+                  <p className="text-red-400 font-mono text-xs">{b.ip_address}</p>
+                  <p className="text-white/30 text-[10px]">{b.reason}</p>
+                </div>
+                <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleUnblockIp(b.ip_address)} className="px-2 py-1 rounded-lg bg-green-500/15 text-green-400 text-[10px] font-bold">Unblock</motion.button>
+              </div>
+            ))}
+          </GlassCard>
+        </div>
+      )}
+
+      {tab === 'suspended' && (
+        <GlassCard className="divide-y divide-white/[0.04] overflow-hidden" animate={false}>
+          {suspendedUsers.length === 0 && <p className="text-white/30 text-xs text-center py-6">No suspended users</p>}
+          {suspendedUsers.map(u => (
+            <div key={u.id} className="flex items-start gap-2 p-3">
+              <div className="flex-1">
+                <p className="text-white/80 text-xs font-semibold">{u.first_name} {u.username && <span className="text-white/40">@{u.username}</span>}</p>
+                <p className="text-red-400/70 text-[10px]">{u.suspension_reason ?? 'No reason'}</p>
+                {u.ip_address && <p className="text-white/20 text-[10px] font-mono">IP: {u.ip_address}</p>}
+              </div>
+              <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleUnsuspend(u)} className="px-2 py-1.5 rounded-lg bg-green-500/15 text-green-400 text-[10px] font-bold flex-shrink-0">Restore</motion.button>
+            </div>
+          ))}
+        </GlassCard>
+      )}
     </div>
   );
 }

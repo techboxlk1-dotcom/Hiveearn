@@ -43,7 +43,7 @@ export default function ProfilePage() {
     {
       title: 'Community',
       items: [
-        { icon: ExternalLink, label: 'Join @hiveearn', href: 'https://t.me/hiveearn', color: 'text-blue-300', bg: 'bg-blue-300/10', external: true },
+        { icon: ExternalLink, label: 'Community Channel', href: 'https://t.me/hiveearn', color: 'text-blue-300', bg: 'bg-blue-300/10', external: true },
         { icon: ExternalLink, label: 'Payment Channel', href: 'https://t.me/hiveearnpayment', color: 'text-green-300', bg: 'bg-green-300/10', external: true },
       ],
     },
