@@ -2,17 +2,17 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, DollarSign, CheckSquare, Megaphone, Gift, Shield, BarChart2, Plus, Check, X, Search, Trash2, Eye, ChevronLeft } from 'lucide-react';
+import { Users, DollarSign, CheckSquare, Megaphone, Gift, Shield, BarChart2, Plus, Check, X, Search, Trash2, Eye, ChevronLeft, Send, Tv, Settings } from 'lucide-react';
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import { supabase } from '@/lib/supabase';
 import type { User, Withdrawal, RewardCode, Task, Announcement, FraudLog, AdminLog } from '@/lib/supabase';
-import { getAllUsers, approveWithdrawal, rejectWithdrawal, createRewardCode, suspendUser, unsuspendUser, createAnnouncement, createTask, getAdminStats, blockIp } from '@/lib/api';
+import { getAllUsers, approveWithdrawal, rejectWithdrawal, createRewardCode, suspendUser, unsuspendUser, createAnnouncement, createTask, getAdminStats, blockIp, broadcastMessage, createAdProvider, updateAdProvider, deleteAdProvider, updateAppSetting, getAppSettings } from '@/lib/api';
 import { formatHive, formatUsdt, hiveToUsdt, timeAgo, truncateAddress } from '@/lib/utils';
 import { toast } from 'sonner';
 
-type AdminSection = 'dashboard' | 'users' | 'withdrawals' | 'reward_codes' | 'tasks' | 'announcements' | 'fraud' | 'logs';
+type AdminSection = 'dashboard' | 'users' | 'withdrawals' | 'reward_codes' | 'tasks' | 'announcements' | 'fraud' | 'logs' | 'broadcast' | 'ads' | 'settings';
 
 export default function AdminPage() {
   const { user, isAdmin } = useUser();
@@ -40,6 +40,9 @@ export default function AdminPage() {
     { id: 'reward_codes', label: 'Reward Codes', icon: Gift },
     { id: 'tasks', label: 'Tasks', icon: CheckSquare },
     { id: 'announcements', label: 'Announcements', icon: Megaphone },
+    { id: 'broadcast', label: 'Broadcast', icon: Send },
+    { id: 'ads', label: 'Ad Providers', icon: Tv },
+    { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'fraud', label: 'Fraud Logs', icon: Shield },
     { id: 'logs', label: 'Admin Logs', icon: Eye },
   ] as const;
@@ -85,6 +88,9 @@ export default function AdminPage() {
             {section === 'reward_codes' && <AdminRewardCodes adminId={user.id} />}
             {section === 'tasks' && <AdminTasks adminId={user.id} />}
             {section === 'announcements' && <AdminAnnouncements adminId={user.id} />}
+            {section === 'broadcast' && <AdminBroadcast adminId={user.id} />}
+            {section === 'ads' && <AdminAds adminId={user.id} />}
+            {section === 'settings' && <AdminSettings adminId={user.id} />}
             {section === 'fraud' && <AdminFraud />}
             {section === 'logs' && <AdminLogs />}
           </motion.div>
@@ -637,6 +643,231 @@ function AdminFraud() {
           ))}
         </GlassCard>
       )}
+    </div>
+  );
+}
+
+// ─── Broadcast ────────────────────────────────────────────────────────────────
+function AdminBroadcast({ adminId }: { adminId: string }) {
+  const [message, setMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState<{ sent: number; failed: number } | null>(null);
+
+  const handleSend = async () => {
+    if (!message.trim()) { toast.error('Message cannot be empty'); return; }
+    setSending(true);
+    setResult(null);
+    const res = await broadcastMessage(message.trim());
+    if (res.success) {
+      setResult({ sent: res.sent, failed: res.failed });
+      toast.success(`Broadcast sent to ${res.sent} users`);
+      setMessage('');
+      await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'broadcast', new_data: { message, sent: res.sent } });
+    } else {
+      toast.error('Broadcast failed');
+    }
+    setSending(false);
+  };
+
+  return (
+    <div className="space-y-3">
+      <GlassCard className="p-4 space-y-3" animate={false}>
+        <div className="flex items-center gap-2">
+          <Send size={16} className="text-hive-gold" />
+          <p className="text-white/60 text-xs font-semibold uppercase tracking-widest">Broadcast Message</p>
+        </div>
+        <p className="text-white/30 text-[10px]">Send a message with Open Mini App button to all non-suspended users via bot.</p>
+        <textarea
+          value={message}
+          onChange={e => setMessage(e.target.value)}
+          placeholder="Type your announcement message here..."
+          rows={5}
+          className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none focus:border-hive-gold/30 resize-none"
+        />
+        <motion.button
+          whileTap={{ scale: 0.96 }}
+          onClick={handleSend}
+          disabled={sending || !message.trim()}
+          className="w-full py-3 btn-hive rounded-xl font-bold text-sm disabled:opacity-40"
+        >
+          {sending ? 'Sending...' : '📢 Broadcast to All Users'}
+        </motion.button>
+        {result && (
+          <div className="flex gap-2">
+            <div className="flex-1 p-2 bg-green-500/10 border border-green-500/20 rounded-lg text-center">
+              <p className="text-green-400 text-lg font-bold">{result.sent}</p>
+              <p className="text-green-400/60 text-[10px]">Sent</p>
+            </div>
+            <div className="flex-1 p-2 bg-red-500/10 border border-red-500/20 rounded-lg text-center">
+              <p className="text-red-400 text-lg font-bold">{result.failed}</p>
+              <p className="text-red-400/60 text-[10px]">Failed</p>
+            </div>
+          </div>
+        )}
+      </GlassCard>
+    </div>
+  );
+}
+
+// ─── Ad Providers ─────────────────────────────────────────────────────────────
+function AdminAds({ adminId }: { adminId: string }) {
+  const [providers, setProviders] = useState<Array<{ id: string; name: string; url: string; hive_per_ad: number; daily_limit: number; is_active: boolean; sort_order: number }>>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ name: '', url: '', hive_per_ad: '', daily_limit: '10', sort_order: '0' });
+
+  const load = () => supabase.from('ad_providers').select('*').order('sort_order').then(({ data }) => setProviders(data ?? []));
+  useEffect(() => { load(); }, []);
+
+  const handleCreate = async () => {
+    if (!form.name || !form.url || !form.hive_per_ad) { toast.error('Name, URL, and Hive/ad required'); return; }
+    const res = await createAdProvider(adminId, {
+      name: form.name,
+      url: form.url,
+      hive_per_ad: parseFloat(form.hive_per_ad),
+      daily_limit: parseInt(form.daily_limit) || 10,
+      sort_order: parseInt(form.sort_order) || 0,
+    });
+    if (res.success) {
+      toast.success('Ad provider created');
+      setShowForm(false);
+      setForm({ name: '', url: '', hive_per_ad: '', daily_limit: '10', sort_order: '0' });
+      load();
+    } else {
+      toast.error(res.message);
+    }
+  };
+
+  const handleToggle = async (id: string, active: boolean) => {
+    await updateAdProvider(id, { is_active: !active });
+    load();
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Delete this ad provider?')) return;
+    await deleteAdProvider(id);
+    toast.success('Deleted');
+    load();
+  };
+
+  return (
+    <div className="space-y-3">
+      <motion.button whileTap={{ scale: 0.96 }} onClick={() => setShowForm(!showForm)} className="w-full flex items-center justify-center gap-2 py-3 btn-hive rounded-xl font-bold text-sm">
+        <Plus size={16} /> {showForm ? 'Cancel' : 'Add Ad Provider'}
+      </motion.button>
+
+      {showForm && (
+        <GlassCard className="p-4 space-y-3" animate={false}>
+          {[
+            { key: 'name', label: 'Provider Name *', placeholder: 'e.g. Adsterra', type: 'text' },
+            { key: 'url', label: 'Ad URL *', placeholder: 'https://...', type: 'text' },
+            { key: 'hive_per_ad', label: 'Hive per Ad *', placeholder: 'e.g. 0.5', type: 'number' },
+            { key: 'daily_limit', label: 'Daily Limit', placeholder: 'e.g. 10', type: 'number' },
+            { key: 'sort_order', label: 'Sort Order', placeholder: 'e.g. 0', type: 'number' },
+          ].map(({ key, label, placeholder, type }) => (
+            <div key={key}>
+              <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">{label}</label>
+              <input type={type} placeholder={placeholder} value={form[key as keyof typeof form]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none focus:border-hive-gold/30" />
+            </div>
+          ))}
+          <motion.button whileTap={{ scale: 0.96 }} onClick={handleCreate} className="w-full py-3 btn-hive rounded-xl font-bold text-sm">Create Provider</motion.button>
+        </GlassCard>
+      )}
+
+      <GlassCard className="divide-y divide-white/[0.04] overflow-hidden" animate={false}>
+        {providers.length === 0 && <p className="text-white/30 text-xs text-center py-6">No ad providers</p>}
+        {providers.map(p => (
+          <div key={p.id} className="flex items-center gap-2 p-3">
+            <div className="flex-1 min-w-0">
+              <p className={`text-xs font-semibold ${p.is_active ? 'text-white/80' : 'text-white/30 line-through'}`}>{p.name}</p>
+              <p className="text-white/40 text-[10px]">{p.hive_per_ad} 🍯/ad • {p.daily_limit}/day</p>
+            </div>
+            <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleToggle(p.id, p.is_active)} className={`px-2 py-1 rounded-lg text-[10px] font-bold ${p.is_active ? 'bg-green-500/15 text-green-400' : 'bg-white/[0.06] text-white/40'}`}>
+              {p.is_active ? 'Active' : 'Off'}
+            </motion.button>
+            <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleDelete(p.id)} className="px-2 py-1 rounded-lg bg-red-500/15 text-red-400 text-[10px] font-bold">
+              <Trash2 size={12} />
+            </motion.button>
+          </div>
+        ))}
+      </GlassCard>
+    </div>
+  );
+}
+
+// ─── App Settings ─────────────────────────────────────────────────────────────
+function AdminSettings({ adminId }: { adminId: string }) {
+  const [settings, setSettings] = useState<Record<string, string>>({});
+  const [editKey, setEditKey] = useState('');
+  const [editValue, setEditValue] = useState('');
+
+  const load = async () => {
+    const s = await getAppSettings();
+    setSettings(s);
+  };
+  useEffect(() => { load(); }, []);
+
+  const handleSave = async () => {
+    if (!editKey.trim()) { toast.error('Key required'); return; }
+    await updateAppSetting(editKey.trim(), editValue.trim());
+    toast.success('Setting saved');
+    setEditKey(''); setEditValue('');
+    load();
+    await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'update_setting', new_data: { key: editKey, value: editValue } });
+  };
+
+  const knownSettings = [
+    { key: 'hive_to_usdt', label: 'HIVE → USDT Rate', placeholder: 'e.g. 0.001' },
+    { key: 'min_withdrawal_usdt', label: 'Min Withdrawal (USDT)', placeholder: 'e.g. 0.08' },
+    { key: 'referral_reward', label: 'Referral Reward (Hive)', placeholder: 'e.g. 25' },
+    { key: 'daily_bonus', label: 'Daily Bonus (Hive)', placeholder: 'e.g. 10' },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <GlassCard className="p-4 space-y-3" animate={false}>
+        <div className="flex items-center gap-2">
+          <Settings size={16} className="text-hive-gold" />
+          <p className="text-white/60 text-xs font-semibold uppercase tracking-widest">App Settings</p>
+        </div>
+
+        {/* Known settings */}
+        {knownSettings.map(({ key, label, placeholder }) => (
+          <div key={key} className="flex items-center gap-2">
+            <div className="flex-1">
+              <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">{label}</label>
+              <input
+                type="text"
+                placeholder={placeholder}
+                defaultValue={settings[key] ?? ''}
+                onBlur={e => { if (e.target.value !== (settings[key] ?? '')) { updateAppSetting(key, e.target.value).then(() => { toast.success(`${label} updated`); load(); }); } }}
+                className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none focus:border-hive-gold/30"
+              />
+            </div>
+          </div>
+        ))}
+
+        {/* Custom setting */}
+        <div className="pt-2 border-t border-white/[0.06]">
+          <p className="text-white/40 text-[10px] uppercase tracking-wider mb-2">Add Custom Setting</p>
+          <div className="flex gap-2">
+            <input value={editKey} onChange={e => setEditKey(e.target.value)} placeholder="key" className="flex-1 px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none" />
+            <input value={editValue} onChange={e => setEditValue(e.target.value)} placeholder="value" className="flex-1 px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none" />
+            <motion.button whileTap={{ scale: 0.96 }} onClick={handleSave} className="px-4 py-2.5 btn-hive rounded-xl text-xs font-bold">Save</motion.button>
+          </div>
+        </div>
+      </GlassCard>
+
+      {/* All settings list */}
+      <GlassCard className="divide-y divide-white/[0.04] overflow-hidden" animate={false}>
+        {Object.entries(settings).length === 0 && <p className="text-white/30 text-xs text-center py-4">No settings</p>}
+        {Object.entries(settings).map(([key, value]) => (
+          <div key={key} className="flex items-center justify-between p-3">
+            <p className="text-white/60 text-xs font-mono">{key}</p>
+            <p className="text-hive-gold text-xs font-mono">{value}</p>
+          </div>
+        ))}
+      </GlassCard>
     </div>
   );
 }

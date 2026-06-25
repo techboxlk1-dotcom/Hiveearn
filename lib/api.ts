@@ -2,35 +2,21 @@ import { supabase } from './supabase';
 import type { User, Transaction, Withdrawal, RewardCode, Task, Referral, Notification, Announcement, AdProvider } from './supabase';
 import { generateReferralCode, isValidBep20Address, HIVE_TO_USDT } from './utils';
 
-const MINI_APP_URL = 'https://t.me/Hiveearnbot/play';
-const BOT_TOKEN = '8969456125:AAFm5CQIhVWpTL6XQDhj-YoVDEojprQWHo4';
 const ADMIN_CHAT_ID = '5419054691';
+const EDGE_FUNCTION_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-bot-message`;
 
-// ─── Telegram Bot Notification ────────────────────────────────────────────────
+// ─── Telegram Bot Notification (via Edge Function) ───────────────────────────
 
 export async function sendBotMessage(chatId: string | number, text: string, includeAppButton = true): Promise<void> {
   try {
-    const payload: Record<string, unknown> = {
-      chat_id: chatId,
-      text,
-      parse_mode: 'HTML',
-    };
-
-    if (includeAppButton) {
-      payload.reply_markup = {
-        inline_keyboard: [[
-          {
-            text: '🐝 Open Hive Earn',
-            web_app: { url: MINI_APP_URL },
-          },
-        ]],
-      };
-    }
-
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    await fetch(EDGE_FUNCTION_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        include_app_button: includeAppButton,
+      }),
     });
   } catch {
     // Bot notification failure should never block main app logic
@@ -41,63 +27,90 @@ async function notifyAdmin(text: string): Promise<void> {
   await sendBotMessage(ADMIN_CHAT_ID, text, false);
 }
 
+// Welcome message sent on first login / /start
+export async function sendWelcomeMessage(telegramId: number, firstName: string, username?: string): Promise<void> {
+  const text = `🐝 <b>Welcome to Hive Earn, ${firstName}!</b>\n\n` +
+    `<b>What is Hive Earn?</b>\n` +
+    `Hive Earn is a Telegram mini app where you earn <b>🍯 Hive tokens</b> by watching ads, completing tasks, claiming daily bonuses, and inviting friends. Hive tokens can be withdrawn as <b>USDT (BEP20)</b> to your wallet.\n\n` +
+    `<b>How to earn:</b>\n` +
+    `📺 Watch ads — earn Hive per ad\n` +
+    `✅ Complete tasks — social media tasks with rewards\n` +
+    `🎁 Daily bonus — claim every 24 hours\n` +
+    `⚡ Reward codes — redeem codes for bonus Hive\n` +
+    `👥 Refer friends — earn up to 150 🍯 Hive per referral\n\n` +
+    `<b>Withdrawal:</b>\n` +
+    `Minimum: 0.08 USDT | Network: BSC (BEP20)\n\n` +
+    `Tap the button below to open the mini app and start earning! 🚀`;
+  await sendBotMessage(telegramId, text, true);
+}
+
 // ─── IP / Fraud Helpers ───────────────────────────────────────────────────────
 
 export async function detectAndHandleIpAbuse(userId: string, ipAddress: string): Promise<void> {
   if (!ipAddress || ipAddress === 'unknown') return;
 
-  // Check if IP is in block list
+  // Check if IP is in block list — suspend all users on this IP
   const { data: blocked } = await supabase.from('ip_blocks').select('id').eq('ip_address', ipAddress).maybeSingle();
   if (blocked) {
     await autoSuspendUser(userId, `IP address ${ipAddress} is blocked`);
     return;
   }
 
-  // Find all non-admin accounts on same IP (excluding current user)
-  const { data: sameIpUsers } = await supabase
+  // Find ALL accounts on same IP (including current user), sorted by created_at ASC
+  // The FIRST account (oldest) is kept; all others are suspended
+  const { data: allIpUsers } = await supabase
     .from('users')
-    .select('id, telegram_id, first_name, is_suspended, is_admin')
+    .select('id, telegram_id, first_name, is_suspended, is_admin, created_at')
     .eq('ip_address', ipAddress)
-    .neq('id', userId);
+    .order('created_at', { ascending: true });
 
-  if (!sameIpUsers || sameIpUsers.length === 0) return;
+  if (!allIpUsers || allIpUsers.length <= 1) return;
 
-  // Only flag if more than 1 extra account on same IP (allow family/shared network with 1)
-  if (sameIpUsers.length >= 2) {
-    // Mark ip_flagged for all accounts on this IP
-    await supabase.from('users').update({ ip_flagged: true }).eq('ip_address', ipAddress);
+  // First (oldest) account is the legitimate one — keep it
+  const firstUser = allIpUsers[0];
+  const duplicateUsers = allIpUsers.slice(1);
 
-    // Auto-suspend current user if not admin
-    const { data: currentUser } = await supabase.from('users').select('is_admin, is_suspended').eq('id', userId).maybeSingle();
-    if (currentUser && !currentUser.is_admin && !currentUser.is_suspended) {
-      await autoSuspendUser(userId, `Multiple accounts detected from same IP (${ipAddress})`);
+  // Mark ip_flagged for all accounts on this IP
+  await supabase.from('users').update({ ip_flagged: true }).eq('ip_address', ipAddress);
 
-      // Log fraud
-      await supabase.from('fraud_logs').insert({
-        user_id: userId,
-        type: 'multiple_accounts',
-        description: `Auto-suspended: ${sameIpUsers.length + 1} accounts on IP ${ipAddress}`,
-        ip_address: ipAddress,
-        severity: 'high',
-      });
-
-      await notifyAdmin(
-        `🚨 <b>Fraud Detected</b>\n\nMultiple accounts on same IP: <code>${ipAddress}</code>\nAccounts: ${sameIpUsers.length + 1}\nAuto-suspended new account.`
-      );
-    }
+  // Suspend all duplicate accounts (except admins and already-suspended)
+  for (const dup of duplicateUsers) {
+    if (dup.is_admin || dup.is_suspended) continue;
+    await autoSuspendUser(dup.id, `Multiple accounts from same IP (${ipAddress}). First account kept.`);
   }
+
+  // Log fraud
+  await supabase.from('fraud_logs').insert({
+    user_id: userId,
+    type: 'multiple_accounts',
+    description: `Same IP detected: ${allIpUsers.length} accounts on IP ${ipAddress}. First account (${firstUser.first_name}) kept, ${duplicateUsers.length} suspended.`,
+    ip_address: ipAddress,
+    severity: 'high',
+  });
+
+  // Notify admin
+  await notifyAdmin(
+    `🚨 <b>Same-IP Accounts Detected</b>\n\nIP: <code>${ipAddress}</code>\nTotal accounts: ${allIpUsers.length}\n\n✅ First account kept: ${firstUser.first_name} (<code>${firstUser.telegram_id}</code>)\n🚫 ${duplicateUsers.length} duplicate account(s) suspended.\n\nReview in Admin Panel → Fraud → Suspended.`
+  );
 }
 
 async function autoSuspendUser(userId: string, reason: string): Promise<void> {
-  const { data: user } = await supabase.from('users').select('is_admin, is_suspended, telegram_id, first_name').eq('id', userId).maybeSingle();
+  const { data: user } = await supabase.from('users').select('is_admin, is_suspended, telegram_id, first_name, username, ip_address').eq('id', userId).maybeSingle();
   if (!user || user.is_admin || user.is_suspended) return;
 
   await supabase.from('users').update({ is_suspended: true, suspension_reason: reason }).eq('id', userId);
   await createNotification(userId, 'suspended', 'Account Suspended', `Your account has been automatically suspended. Reason: ${reason}`);
+
+  // Notify user via bot (no app button — they can't use it anyway)
   await sendBotMessage(
     user.telegram_id,
-    `🚫 <b>Account Suspended</b>\n\nYour Hive Earn account has been suspended.\n\n<b>Reason:</b> ${reason}\n\nContact support if you believe this is a mistake.`,
+    `🚫 <b>Account Suspended</b>\n\nYour Hive Earn account has been suspended.\n\n<b>Reason:</b> ${reason}\n\nIf you believe this is a mistake, contact support: @hiveearn`,
     false
+  );
+
+  // Notify admin via bot
+  await notifyAdmin(
+    `🚫 <b>User Auto-Suspended</b>\n\nUser: ${user.first_name}${user.username ? ` (@${user.username})` : ''}\nTelegram ID: <code>${user.telegram_id}</code>${user.ip_address ? `\nIP: <code>${user.ip_address}</code>` : ''}\n\n<b>Reason:</b> ${reason}`
   );
 }
 
@@ -205,6 +218,9 @@ export async function upsertUser(telegramData: {
     .maybeSingle();
 
   if (newUser) {
+    // Send welcome message to new user via bot
+    await sendWelcomeMessage(newUser.telegram_id, newUser.first_name, newUser.username ?? undefined);
+
     // Notify admin of new user via bot
     await notifyAdmin(
       `👤 <b>New User Joined</b>\n\nName: ${newUser.first_name}${newUser.username ? ` (@${newUser.username})` : ''}\nTelegram ID: <code>${newUser.telegram_id}</code>${telegramData.ip_address ? `\nIP: <code>${telegramData.ip_address}</code>` : ''}${referredBy ? '\nVia referral link' : ''}`
@@ -221,12 +237,12 @@ export async function upsertUser(telegramData: {
       });
       await creditHive(referredBy, 25, 'referral', '🍯 New referral joined');
       await createNotification(referredBy, 'referral', '🐝 New Referral!', `Someone joined using your referral link. +25 🍯 Hive earned!`);
-      // Notify referrer via bot
-      const { data: referrerUser } = await supabase.from('users').select('telegram_id').eq('id', referredBy).maybeSingle();
+      // Notify referrer via bot with Open Mini App button
+      const { data: referrerUser } = await supabase.from('users').select('telegram_id, first_name').eq('id', referredBy).maybeSingle();
       if (referrerUser) {
         await sendBotMessage(
           referrerUser.telegram_id,
-          `🐝 <b>New Referral Joined!</b>\n\n${newUser.first_name} joined using your referral link.\n\n💰 You earned <b>+25 🍯 Hive</b>!\n\nThey need to watch ads to unlock more rewards for you.`
+          `🐝 <b>New Referral Joined!</b>\n\n${newUser.first_name} joined using your referral link.\n\n💰 You earned <b>+25 🍯 Hive</b>!\n\nThey need to watch ads to unlock more rewards for you.\n\nTap below to open the mini app and track your referrals!`
         );
       }
     } else if (referredBy && sameIpReferral) {
@@ -597,9 +613,15 @@ export async function requestWithdrawal(userId: string, hiveAmount: number): Pro
 
   await createNotification(userId, 'withdraw_pending', '💸 Withdrawal Requested', `Your withdrawal of ${netAmount.toFixed(6)} USDT is pending admin approval.`);
 
+  // Notify user via bot
+  await sendBotMessage(
+    user.telegram_id,
+    `💸 <b>Withdrawal Request Submitted</b>\n\nAmount: <b>${netAmount.toFixed(6)} USDT</b>\nHive: ${hiveAmount} 🍯\nWallet: <code>${wallet.address}</code>\n\nStatus: <b>Pending</b> — admin will review your request shortly.\n\nYou'll be notified once approved. Tap below to check status in the mini app!`
+  );
+
   // Notify admin via bot
   await notifyAdmin(
-    `💸 <b>New Withdrawal Request</b>\n\nUser: ${user.first_name}\nAmount: <b>${netAmount.toFixed(6)} USDT</b>\nHive: ${hiveAmount}\nWallet: <code>${wallet.address}</code>\n\nPlease review in Admin Panel.`
+    `💸 <b>New Withdrawal Request</b>\n\nUser: ${user.first_name}\nAmount: <b>${netAmount.toFixed(6)} USDT</b>\nHive: ${hiveAmount} 🍯\nWallet: <code>${wallet.address}</code>\n\nPlease review in Admin Panel.`
   );
 
   return { success: true, message: 'Withdrawal request submitted' };
@@ -768,11 +790,18 @@ export async function rejectWithdrawal(adminId: string, withdrawalId: string, re
 }
 
 export async function createRewardCode(adminId: string, code: string, reward: number, limit?: number, expiresAt?: string, description?: string): Promise<{ success: boolean; message: string }> {
+  // Convert datetime-local format (YYYY-MM-DDTHH:mm) to ISO string for timestamptz
+  let expiresIso: string | null = null;
+  if (expiresAt && expiresAt.trim()) {
+    const d = new Date(expiresAt);
+    if (!isNaN(d.getTime())) expiresIso = d.toISOString();
+  }
+
   const { error } = await supabase.from('reward_codes').insert({
     code: code.toUpperCase(),
     reward_amount: reward,
     usage_limit: limit ?? null,
-    expires_at: expiresAt ?? null,
+    expires_at: expiresIso,
     created_by: adminId,
     description: description ?? null,
   });
@@ -800,3 +829,76 @@ export async function getAdminStats() {
   ]);
   return { totalUsers: totalUsers ?? 0, pendingWithdrawals: pendingWithdrawals ?? 0, totalTasks: totalTasks ?? 0, settings: settings ?? [] };
 }
+
+// ─── Broadcast (Admin → All Users via Bot) ────────────────────────────────────
+
+export async function broadcastMessage(message: string): Promise<{ success: boolean; sent: number; failed: number }> {
+  const { data: users } = await supabase.from('users').select('telegram_id, is_suspended').eq('is_suspended', false);
+  if (!users || users.length === 0) return { success: false, sent: 0, failed: 0 };
+
+  let sent = 0;
+  let failed = 0;
+
+  // Send in batches of 25 to avoid rate limits
+  for (let i = 0; i < users.length; i += 25) {
+    const batch = users.slice(i, i + 25);
+    await Promise.all(batch.map(async (u) => {
+      try {
+        await sendBotMessage(u.telegram_id, `📢 <b>Announcement</b>\n\n${message}`);
+        sent++;
+      } catch {
+        failed++;
+      }
+    }));
+    // Small delay between batches
+    if (i + 25 < users.length) await new Promise(r => setTimeout(r, 500));
+  }
+
+  return { success: true, sent, failed };
+}
+
+// ─── Ad Providers (Admin) ──────────────────────────────────────────────────────
+
+export async function createAdProvider(adminId: string, provider: {
+  name: string;
+  url: string;
+  hive_per_ad: number;
+  daily_limit: number;
+  sort_order?: number;
+  icon_url?: string;
+}): Promise<{ success: boolean; message: string }> {
+  const { error } = await supabase.from('ad_providers').insert({
+    name: provider.name,
+    url: provider.url,
+    hive_per_ad: provider.hive_per_ad,
+    daily_limit: provider.daily_limit,
+    sort_order: provider.sort_order ?? 0,
+    icon_url: provider.icon_url ?? null,
+    is_active: true,
+  });
+  if (error) return { success: false, message: error.message };
+  await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'create_ad_provider', new_data: provider });
+  return { success: true, message: 'Ad provider created' };
+}
+
+export async function updateAdProvider(id: string, updates: Record<string, unknown>): Promise<void> {
+  await supabase.from('ad_providers').update(updates).eq('id', id);
+}
+
+export async function deleteAdProvider(id: string): Promise<void> {
+  await supabase.from('ad_providers').delete().eq('id', id);
+}
+
+// ─── App Settings (Admin) ─────────────────────────────────────────────────────
+
+export async function updateAppSetting(key: string, value: string): Promise<void> {
+  await supabase.from('app_settings').upsert({ key, value }, { onConflict: 'key' });
+}
+
+export async function getAppSettings(): Promise<Record<string, string>> {
+  const { data } = await supabase.from('app_settings').select('*');
+  const map: Record<string, string> = {};
+  (data ?? []).forEach((s: { key: string; value: string }) => { map[s.key] = s.value; });
+  return map;
+}
+
