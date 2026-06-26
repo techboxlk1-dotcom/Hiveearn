@@ -12,6 +12,7 @@ import type { DailyBonusClaim } from '@/lib/supabase';
 import { timeAgo, canClaimDailyBonus, hoursUntilNextBonus } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useRewardPopup } from '@/components/ui/RewardPopup';
+import { useAds } from '@/hooks/useAds';
 
 export default function DailyBonusPage() {
   const { showReward } = useRewardPopup();
@@ -21,6 +22,7 @@ export default function DailyBonusPage() {
   const [history, setHistory] = useState<DailyBonusClaim[]>([]);
   const [lastClaim, setLastClaim] = useState<string | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
+  const { showRandomAd } = useAds();
 
   useEffect(() => {
     if (!user) return;
@@ -38,6 +40,7 @@ export default function DailyBonusPage() {
     if (!user || claiming || !canClaim) return;
     setClaiming(true);
     try {
+      await showRandomAd();
       const result = await claimDailyBonus(user.id);
       if (result.success) {
         setClaimed(true);

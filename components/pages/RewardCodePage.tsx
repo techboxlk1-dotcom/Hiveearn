@@ -12,6 +12,7 @@ import type { RewardCodeClaim, RewardCode } from '@/lib/supabase';
 import { timeAgo } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useRewardPopup } from '@/components/ui/RewardPopup';
+import { useAds } from '@/hooks/useAds';
 
 interface ClaimWithCode extends RewardCodeClaim {
   reward_codes: RewardCode | null;
@@ -25,6 +26,7 @@ export default function RewardCodePage() {
   const [success, setSuccess] = useState(false);
   const [earned, setEarned] = useState(0);
   const [history, setHistory] = useState<ClaimWithCode[]>([]);
+  const { showRandomAd } = useAds();
 
   useEffect(() => {
     if (!user) return;
@@ -41,6 +43,7 @@ export default function RewardCodePage() {
     if (!user || !code.trim() || claiming) return;
     setClaiming(true);
     try {
+      await showRandomAd();
       const result = await claimRewardCode(user.id, code.trim());
       if (result.success) {
         setEarned(result.hive);
@@ -50,7 +53,6 @@ export default function RewardCodePage() {
         toast.success(result.message, { icon: '🎁' });
         showReward(result.hive, 'Code Redeemed!', 'Reward code bonus', '⚡');
         setTimeout(() => setSuccess(false), 3000);
-        // Refresh history
         const { data } = await supabase.from('reward_code_claims').select('*, reward_codes(*)').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20);
         setHistory((data as ClaimWithCode[]) ?? []);
       } else {

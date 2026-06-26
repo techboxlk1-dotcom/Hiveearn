@@ -1,41 +1,49 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { ArrowLeft, Copy, Share2, Users, CheckCircle, Clock, XCircle } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ArrowLeft, Copy, Share2, Users, CheckCircle, Clock, XCircle, Gift, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
-import { getUserReferrals } from '@/lib/api';
+import { getUserReferrals, claimReferralRewards } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import type { Referral, User } from '@/lib/supabase';
 import { timeAgo } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useAds } from '@/hooks/useAds';
 
 interface ReferralWithUser extends Referral {
   referred: User | null;
 }
 
 export default function ReferralPage() {
-  const { user } = useUser();
+  const { user, refreshUser } = useUser();
   const [referrals, setReferrals] = useState<ReferralWithUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [unclaimedHive, setUnclaimedHive] = useState(0);
+  const [claiming, setClaiming] = useState(false);
+  const [showClaimModal, setShowClaimModal] = useState(false);
+  const { showRandomAd } = useAds();
+
+  const loadData = useCallback(async () => {
+    if (!user) return;
+    const refs = await getUserReferrals(user.id);
+    const withUsers = await Promise.all(
+      refs.map(async r => {
+        const { data: u } = await supabase.from('users').select('*').eq('id', r.referred_id).maybeSingle();
+        return { ...r, referred: u };
+      })
+    );
+    setReferrals(withUsers);
+    const { data: u } = await supabase.from('users').select('unclaimed_referral_hive').eq('id', user.id).maybeSingle();
+    setUnclaimedHive(u?.unclaimed_referral_hive || 0);
+    setLoading(false);
+  }, [user]);
 
   useEffect(() => {
-    if (!user) return;
-    const load = async () => {
-      const refs = await getUserReferrals(user.id);
-      const withUsers = await Promise.all(
-        refs.map(async r => {
-          const { data: u } = await supabase.from('users').select('*').eq('id', r.referred_id).maybeSingle();
-          return { ...r, referred: u };
-        })
-      );
-      setReferrals(withUsers);
-      setLoading(false);
-    };
-    load();
-  }, [user]);
+    loadData();
+  }, [loadData]);
 
   if (!user) return null;
 
@@ -54,6 +62,27 @@ export default function ReferralPage() {
       navigator.share({ title: 'Join Hive Earn', text: 'Earn USDT with me on Hive Earn!', url: referralLink });
     } else {
       copyLink();
+    }
+  };
+
+  const handleClaim = async () => {
+    if (!user || claiming || unclaimedHive <= 0) return;
+    setClaiming(true);
+    try {
+      await showRandomAd();
+      const result = await claimReferralRewards(user.id);
+      if (result.success) {
+        toast.success(result.message);
+        setUnclaimedHive(0);
+        refreshUser?.();
+        loadData();
+      } else {
+        toast.error(result.message);
+      }
+    } catch {
+      toast.error('Failed to claim rewards');
+    } finally {
+      setClaiming(false);
     }
   };
 
@@ -99,6 +128,38 @@ export default function ReferralPage() {
           ))}
         </div>
       </motion.div>
+
+      {/* Unclaimed Rewards */}
+      {unclaimedHive > 0 && (
+        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="mb-4">
+          <GlassCard className="p-4 bg-gradient-to-br from-hive-gold/20 to-transparent border-hive-gold/30" animate={false}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-hive-gold/20 flex items-center justify-center">
+                  <Gift className="text-hive-gold" size={24} />
+                </div>
+                <div>
+                  <p className="text-white font-bold">Unclaimed Rewards</p>
+                  <p className="text-hive-gold font-black text-xl">{unclaimedHive} Hive</p>
+                </div>
+              </div>
+              <motion.button
+                onClick={handleClaim}
+                disabled={claiming}
+                whileTap={{ scale: 0.95 }}
+                className="px-4 py-2 rounded-xl btn-hive font-bold text-sm flex items-center gap-2"
+              >
+                {claiming ? (
+                  <span className="flex items-center gap-2"><Sparkles size={16} className="animate-pulse" /> Claiming...</span>
+                ) : (
+                  <span>Claim</span>
+                )}
+              </motion.button>
+            </div>
+            <p className="text-white/40 text-xs mt-3">Watch an ad to claim your referral rewards</p>
+          </GlassCard>
+        </motion.div>
+      )}
 
       {/* Referral link */}
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="mb-4">

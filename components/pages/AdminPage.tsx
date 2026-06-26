@@ -1,18 +1,18 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, DollarSign, CheckSquare, Megaphone, Gift, Shield, BarChart2, Plus, Check, X, Search, Trash2, Eye, ChevronLeft, Send, Tv, Settings } from 'lucide-react';
+import { Users, DollarSign, CheckSquare, Megaphone, Gift, Shield, BarChart2, Plus, Check, X, Search, Trash2, Eye, ChevronLeft, Send, Tv, Settings, Globe, UserCog, Wrench, Activity, Star, StarOff } from 'lucide-react';
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import { supabase } from '@/lib/supabase';
 import type { User, Withdrawal, RewardCode, Task, Announcement, FraudLog, AdminLog } from '@/lib/supabase';
-import { getAllUsers, approveWithdrawal, rejectWithdrawal, createRewardCode, suspendUser, unsuspendUser, createAnnouncement, createTask, getAdminStats, blockIp, broadcastMessage, createAdProvider, updateAdProvider, deleteAdProvider, updateAppSetting, getAppSettings } from '@/lib/api';
+import { getAllUsers, approveWithdrawal, rejectWithdrawal, createRewardCode, suspendUser, unsuspendUser, createAnnouncement, createTask, getAdminStats, blockIp, broadcastMessage, createAdProvider, updateAdProvider, deleteAdProvider, updateAppSetting, getAppSettings, setManager, listUser, unlistUser, getUserActivity } from '@/lib/api';
 import { formatHive, formatUsdt, hiveToUsdt, timeAgo, truncateAddress } from '@/lib/utils';
 import { toast } from 'sonner';
 
-type AdminSection = 'dashboard' | 'users' | 'withdrawals' | 'reward_codes' | 'tasks' | 'announcements' | 'fraud' | 'logs' | 'broadcast' | 'ads' | 'settings';
+type AdminSection = 'dashboard' | 'users' | 'withdrawals' | 'reward_codes' | 'tasks' | 'announcements' | 'fraud' | 'logs' | 'broadcast' | 'ads' | 'visit_sites' | 'settings';
 
 export default function AdminPage() {
   const { user, isAdmin } = useUser();
@@ -42,6 +42,7 @@ export default function AdminPage() {
     { id: 'announcements', label: 'Announcements', icon: Megaphone },
     { id: 'broadcast', label: 'Broadcast', icon: Send },
     { id: 'ads', label: 'Ad Providers', icon: Tv },
+    { id: 'visit_sites', label: 'Visit Sites', icon: Globe },
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'fraud', label: 'Fraud Logs', icon: Shield },
     { id: 'logs', label: 'Admin Logs', icon: Eye },
@@ -90,6 +91,7 @@ export default function AdminPage() {
             {section === 'announcements' && <AdminAnnouncements adminId={user.id} />}
             {section === 'broadcast' && <AdminBroadcast adminId={user.id} />}
             {section === 'ads' && <AdminAds adminId={user.id} />}
+            {section === 'visit_sites' && <AdminVisitSites adminId={user.id} />}
             {section === 'settings' && <AdminSettings adminId={user.id} />}
             {section === 'fraud' && <AdminFraud />}
             {section === 'logs' && <AdminLogs />}
@@ -102,18 +104,22 @@ export default function AdminPage() {
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 function AdminDashboard({ stats }: { stats: { totalUsers: number; pendingWithdrawals: number; totalTasks: number } }) {
-  const [dbStats, setDbStats] = useState({ totalHive: 0, totalWithdrawals: 0, todayUsers: 0 });
+  const [dbStats, setDbStats] = useState({ totalHive: 0, totalWithdrawals: 0, todayUsers: 0, totalPaidUsdt: 0, pendingUsdt: 0 });
 
   useEffect(() => {
     Promise.all([
       supabase.from('users').select('hive_balance'),
-      supabase.from('withdrawals').select('*', { count: 'exact', head: true }),
+      supabase.from('withdrawals').select('net_amount, status'),
       supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', new Date(Date.now() - 86400000).toISOString()),
-    ]).then(([{ data: users }, { count: wdCount }, { count: todayCount }]) => {
+    ]).then(([{ data: users }, { data: withdrawals }, { count: todayCount }]) => {
+      const approved = (withdrawals ?? []).filter(w => w.status === 'approved');
+      const pending = (withdrawals ?? []).filter(w => w.status === 'pending');
       setDbStats({
         totalHive: (users ?? []).reduce((sum, u) => sum + (u.hive_balance ?? 0), 0),
-        totalWithdrawals: wdCount ?? 0,
+        totalWithdrawals: (withdrawals ?? []).length,
         todayUsers: todayCount ?? 0,
+        totalPaidUsdt: approved.reduce((sum, w) => sum + (w.net_amount ?? 0), 0),
+        pendingUsdt: pending.reduce((sum, w) => sum + (w.net_amount ?? 0), 0),
       });
     });
   }, []);
@@ -138,10 +144,19 @@ function AdminDashboard({ stats }: { stats: { totalUsers: number; pendingWithdra
           </GlassCard>
         ))}
       </div>
+      <GlassCard gold glow className="p-4" animate={false}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-white/60 font-semibold text-sm">Total Paid Out</h3>
+          <span className="text-green-400 text-xs font-bold">USDT (BEP20)</span>
+        </div>
+        <p className="text-green-400 font-black text-2xl">${dbStats.totalPaidUsdt.toFixed(2)}</p>
+        <p className="text-white/30 text-xs mt-1">Approved withdrawals total</p>
+      </GlassCard>
       <GlassCard className="p-4" animate={false}>
         <h3 className="text-white/60 font-semibold text-sm mb-3">Quick Stats</h3>
         <div className="space-y-2 text-xs">
           <div className="flex justify-between"><span className="text-white/40">Total Withdrawals</span><span className="text-white/70 font-bold">{dbStats.totalWithdrawals}</span></div>
+          <div className="flex justify-between"><span className="text-white/40">Pending Amount</span><span className="text-yellow-400 font-bold">${dbStats.pendingUsdt.toFixed(2)}</span></div>
           <div className="flex justify-between"><span className="text-white/40">Total Tasks</span><span className="text-white/70 font-bold">{stats.totalTasks}</span></div>
           <div className="flex justify-between"><span className="text-white/40">Admin</span><span className="text-hive-gold font-bold">You</span></div>
         </div>
@@ -155,6 +170,8 @@ function AdminUsers({ adminId }: { adminId: string }) {
   const [users, setUsers] = useState<User[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [activityUser, setActivityUser] = useState<User | null>(null);
+  const [activity, setActivity] = useState<{ user: User | null; transactions: Array<{ id: string; type: string; amount: number; created_at: string; description: string | null }>; totalAds: number; totalWithdrawals: number; totalWithdrawnUsdt: number; totalTasksCompleted: number; totalReferrals: number; completedReferrals: number; expectedBalance: number; actualBalance: number; balanceMismatch: boolean } | null>(null);
 
   useEffect(() => { getAllUsers(undefined, 30).then(u => { setUsers(u); setLoading(false); }); }, []);
 
@@ -178,6 +195,91 @@ function AdminUsers({ adminId }: { adminId: string }) {
     setUsers(prev => prev.map(pu => pu.id === u.id ? { ...pu, is_suspended: !u.is_suspended } : pu));
   };
 
+  const handleToggleManager = async (u: User) => {
+    const result = await setManager(adminId, u.id, !u.is_manager);
+    if (result.success) {
+      toast.success(u.is_manager ? 'Manager role removed' : 'Manager role granted');
+      setUsers(prev => prev.map(pu => pu.id === u.id ? { ...pu, is_manager: !u.is_manager } : pu));
+    } else {
+      toast.error(result.message);
+    }
+  };
+
+  const handleToggleList = async (u: User) => {
+    if (u.listed) {
+      await unlistUser(adminId, u.id);
+      toast.success('User unlisted');
+    } else {
+      const reason = prompt('Reason for listing:');
+      if (!reason) return;
+      await listUser(adminId, u.id, reason);
+      toast.success('User listed');
+    }
+    setUsers(prev => prev.map(pu => pu.id === u.id ? { ...pu, listed: !u.listed } : pu));
+  };
+
+  const handleViewActivity = async (u: User) => {
+    setActivityUser(u);
+    const act = await getUserActivity(u.id);
+    setActivity(act);
+  };
+
+  if (activityUser && activity) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <motion.button whileTap={{ scale: 0.9 }} onClick={() => { setActivityUser(null); setActivity(null); }} className="px-3 py-2 bg-white/[0.06] rounded-xl text-xs font-bold text-white/70">
+            <ChevronLeft size={14} className="inline mr-1" /> Back
+          </motion.button>
+          <span className="text-white/60 text-xs">Activity for {activityUser.first_name}</span>
+        </div>
+
+        <GlassCard className="p-4 space-y-3" animate={false}>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="text-center p-2 bg-white/[0.04] rounded-lg">
+              <p className="text-hive-gold font-black text-lg">{activity.totalAds}</p>
+              <p className="text-white/40 text-[10px]">Ads Watched</p>
+            </div>
+            <div className="text-center p-2 bg-white/[0.04] rounded-lg">
+              <p className="text-green-400 font-black text-lg">{activity.totalTasksCompleted}</p>
+              <p className="text-white/40 text-[10px]">Tasks Completed</p>
+            </div>
+            <div className="text-center p-2 bg-white/[0.04] rounded-lg">
+              <p className="text-blue-400 font-black text-lg">{activity.totalReferrals}</p>
+              <p className="text-white/40 text-[10px]">Referrals ({activity.completedReferrals} done)</p>
+            </div>
+            <div className="text-center p-2 bg-white/[0.04] rounded-lg">
+              <p className="text-red-400 font-black text-lg">${activity.totalWithdrawnUsdt.toFixed(2)}</p>
+              <p className="text-white/40 text-[10px]">Total Withdrawn</p>
+            </div>
+          </div>
+          <div className="pt-2 border-t border-white/[0.06] flex justify-between">
+            <span className="text-white/40 text-xs">Balance Check</span>
+            {activity.balanceMismatch ? (
+              <span className="text-red-400 text-xs font-bold">MISMATCH: Expected {activity.expectedBalance.toFixed(2)}H</span>
+            ) : (
+              <span className="text-green-400 text-xs font-bold">OK ({activity.actualBalance.toFixed(2)}H)</span>
+            )}
+          </div>
+        </GlassCard>
+
+        <h3 className="text-white/40 text-xs font-semibold uppercase tracking-widest">Recent Transactions</h3>
+        <GlassCard className="divide-y divide-white/[0.04] overflow-hidden" animate={false}>
+          {activity.transactions.length === 0 && <p className="text-white/30 text-xs text-center py-6">No transactions</p>}
+          {activity.transactions.slice(0, 20).map((tx, i) => (
+            <div key={i} className="p-3">
+              <p className="text-white/70 text-xs font-semibold capitalize">{tx.description ?? tx.type.replace('_', ' ')}</p>
+              <div className="flex justify-between">
+                <p className="text-white/40 text-[10px]">{timeAgo(tx.created_at)}</p>
+                <p className={`font-bold text-xs ${tx.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>{tx.amount > 0 ? '+' : ''}{tx.amount}H</p>
+              </div>
+            </div>
+          ))}
+        </GlassCard>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex gap-2">
@@ -195,11 +297,22 @@ function AdminUsers({ adminId }: { adminId: string }) {
               <div className="w-8 h-8 rounded-lg bg-white/[0.06] flex items-center justify-center text-sm flex-shrink-0">{(u.first_name ?? 'U')[0]}</div>
               <div className="flex-1 min-w-0">
                 <p className="text-white/80 text-xs font-medium truncate">{u.first_name} {u.username && <span className="text-white/40">@{u.username}</span>}</p>
-                <p className="text-hive-gold text-[10px]">{formatHive(u.hive_balance)} H {u.is_admin && <span className="text-red-400">• Admin</span>}</p>
+                <p className="text-hive-gold text-[10px]">{formatHive(u.hive_balance)} H {u.is_admin && <span className="text-red-400">• Admin</span>} {u.is_manager && <span className="text-blue-400">• Manager</span>} {u.listed && <span className="text-green-400">• Listed</span>}</p>
               </div>
-              <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleToggleSuspend(u)} className={`px-2 py-1 rounded-lg text-[10px] font-bold ${u.is_suspended ? 'bg-green-500/15 text-green-400' : 'bg-red-500/15 text-red-400'}`}>
-                {u.is_suspended ? 'Unsuspend' : 'Suspend'}
-              </motion.button>
+              <div className="flex gap-1">
+                <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleViewActivity(u)} className="p-1.5 rounded-lg bg-blue-500/15 text-blue-400" title="View Activity">
+                  <Activity size={12} />
+                </motion.button>
+                <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleToggleManager(u)} className={`p-1.5 rounded-lg ${u.is_manager ? 'bg-blue-500/15 text-blue-400' : 'bg-white/[0.06] text-white/30'}`} title="Toggle Manager">
+                  <UserCog size={12} />
+                </motion.button>
+                <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleToggleList(u)} className={`p-1.5 rounded-lg ${u.listed ? 'bg-green-500/15 text-green-400' : 'bg-white/[0.06] text-white/30'}`} title="Toggle Listed">
+                  {u.listed ? <Star size={12} /> : <StarOff size={12} />}
+                </motion.button>
+                <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleToggleSuspend(u)} className={`p-1.5 rounded-lg ${u.is_suspended ? 'bg-green-500/15 text-green-400' : 'bg-red-500/15 text-red-400'}`} title="Suspend">
+                  {u.is_suspended ? <Check size={12} /> : <X size={12} />}
+                </motion.button>
+              </div>
             </div>
           ))}
         </GlassCard>
@@ -650,18 +763,21 @@ function AdminFraud() {
 // ─── Broadcast ────────────────────────────────────────────────────────────────
 function AdminBroadcast({ adminId }: { adminId: string }) {
   const [message, setMessage] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{ sent: number; failed: number } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSend = async () => {
     if (!message.trim()) { toast.error('Message cannot be empty'); return; }
     setSending(true);
     setResult(null);
-    const res = await broadcastMessage(message.trim());
+    const res = await broadcastMessage(message.trim(), imageUrl.trim() ? { photoUrl: imageUrl.trim() } : undefined);
     if (res.success) {
       setResult({ sent: res.sent, failed: res.failed });
       toast.success(`Broadcast sent to ${res.sent} users`);
       setMessage('');
+      setImageUrl('');
       await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'broadcast', new_data: { message, sent: res.sent } });
     } else {
       toast.error('Broadcast failed');
@@ -684,6 +800,21 @@ function AdminBroadcast({ adminId }: { adminId: string }) {
           rows={5}
           className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none focus:border-hive-gold/30 resize-none"
         />
+        <div>
+          <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">Image URL (Optional)</label>
+          <input
+            type="text"
+            value={imageUrl}
+            onChange={e => setImageUrl(e.target.value)}
+            placeholder="https://example.com/image.jpg"
+            className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none focus:border-hive-gold/30"
+          />
+          {imageUrl && (
+            <div className="mt-2 relative">
+              <img src={imageUrl} alt="Preview" className="w-full h-32 object-cover rounded-lg" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; toast.error('Invalid image URL'); }} />
+            </div>
+          )}
+        </div>
         <motion.button
           whileTap={{ scale: 0.96 }}
           onClick={handleSend}
@@ -711,30 +842,46 @@ function AdminBroadcast({ adminId }: { adminId: string }) {
 
 // ─── Ad Providers ─────────────────────────────────────────────────────────────
 function AdminAds({ adminId }: { adminId: string }) {
-  const [providers, setProviders] = useState<Array<{ id: string; name: string; url: string; hive_per_ad: number; daily_limit: number; is_active: boolean; sort_order: number }>>([]);
+  const [providers, setProviders] = useState<Array<{ id: string; name: string; reward_per_ad: number; daily_limit: number; is_active: boolean; sort_order: number; block_id?: string; network_type?: string; min_watch_seconds?: number; sdk_zone?: string }>>([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', url: '', hive_per_ad: '', daily_limit: '10', sort_order: '0' });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '' });
 
   const load = () => supabase.from('ad_providers').select('*').order('sort_order').then(({ data }) => setProviders(data ?? []));
   useEffect(() => { load(); }, []);
 
   const handleCreate = async () => {
-    if (!form.name || !form.url || !form.hive_per_ad) { toast.error('Name, URL, and Hive/ad required'); return; }
+    if (!form.name || !form.reward_per_ad) { toast.error('Name and Hive/ad required'); return; }
     const res = await createAdProvider(adminId, {
       name: form.name,
-      url: form.url,
-      hive_per_ad: parseFloat(form.hive_per_ad),
+      reward_per_ad: parseFloat(form.reward_per_ad),
       daily_limit: parseInt(form.daily_limit) || 10,
       sort_order: parseInt(form.sort_order) || 0,
+      block_id: form.block_id || undefined,
+      network_type: form.network_type || 'interstitial',
+      min_watch_seconds: parseInt(form.min_watch_seconds) || 15,
+      sdk_zone: form.sdk_zone || undefined,
     });
     if (res.success) {
       toast.success('Ad provider created');
       setShowForm(false);
-      setForm({ name: '', url: '', hive_per_ad: '', daily_limit: '10', sort_order: '0' });
+      setForm({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '' });
       load();
     } else {
       toast.error(res.message);
     }
+  };
+
+  const handleUpdate = async (id: string) => {
+    await updateAdProvider(id, {
+      block_id: form.block_id || undefined,
+      network_type: form.network_type || 'interstitial',
+      min_watch_seconds: parseInt(form.min_watch_seconds) || 15,
+      sdk_zone: form.sdk_zone || undefined,
+    });
+    toast.success('Provider updated');
+    setEditingId(null);
+    load();
   };
 
   const handleToggle = async (id: string, active: boolean) => {
@@ -758,11 +905,12 @@ function AdminAds({ adminId }: { adminId: string }) {
       {showForm && (
         <GlassCard className="p-4 space-y-3" animate={false}>
           {[
-            { key: 'name', label: 'Provider Name *', placeholder: 'e.g. Adsterra', type: 'text' },
-            { key: 'url', label: 'Ad URL *', placeholder: 'https://...', type: 'text' },
-            { key: 'hive_per_ad', label: 'Hive per Ad *', placeholder: 'e.g. 0.5', type: 'number' },
+            { key: 'name', label: 'Provider Name *', placeholder: 'e.g. Adsgram', type: 'text' },
+            { key: 'block_id', label: 'Block ID', placeholder: 'e.g. 36138 or int-36139', type: 'text' },
+            { key: 'reward_per_ad', label: 'Hive per Ad *', placeholder: 'e.g. 8', type: 'number' },
             { key: 'daily_limit', label: 'Daily Limit', placeholder: 'e.g. 10', type: 'number' },
-            { key: 'sort_order', label: 'Sort Order', placeholder: 'e.g. 0', type: 'number' },
+            { key: 'min_watch_seconds', label: 'Min Watch Seconds', placeholder: 'e.g. 15', type: 'number' },
+            { key: 'sdk_zone', label: 'SDK Zone', placeholder: 'e.g. 11196790', type: 'text' },
           ].map(({ key, label, placeholder, type }) => (
             <div key={key}>
               <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">{label}</label>
@@ -770,6 +918,14 @@ function AdminAds({ adminId }: { adminId: string }) {
                 className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none focus:border-hive-gold/30" />
             </div>
           ))}
+          <div>
+            <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">Network Type</label>
+            <select value={form.network_type} onChange={e => setForm(f => ({ ...f, network_type: e.target.value }))} className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs focus:outline-none">
+              <option value="interstitial">Interstitial</option>
+              <option value="rewarded">Rewarded</option>
+              <option value="banner">Banner</option>
+            </select>
+          </div>
           <motion.button whileTap={{ scale: 0.96 }} onClick={handleCreate} className="w-full py-3 btn-hive rounded-xl font-bold text-sm">Create Provider</motion.button>
         </GlassCard>
       )}
@@ -780,7 +936,8 @@ function AdminAds({ adminId }: { adminId: string }) {
           <div key={p.id} className="flex items-center gap-2 p-3">
             <div className="flex-1 min-w-0">
               <p className={`text-xs font-semibold ${p.is_active ? 'text-white/80' : 'text-white/30 line-through'}`}>{p.name}</p>
-              <p className="text-white/40 text-[10px]">{p.hive_per_ad} 🍯/ad • {p.daily_limit}/day</p>
+              <p className="text-white/40 text-[10px]">{p.reward_per_ad} 🍯/ad • {p.daily_limit}/day {p.block_id && <span className="text-blue-400">• {p.block_id}</span>}</p>
+              {p.min_watch_seconds && <p className="text-white/30 text-[9px]">Min watch: {p.min_watch_seconds}s • {p.network_type}</p>}
             </div>
             <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleToggle(p.id, p.is_active)} className={`px-2 py-1 rounded-lg text-[10px] font-bold ${p.is_active ? 'bg-green-500/15 text-green-400' : 'bg-white/[0.06] text-white/40'}`}>
               {p.is_active ? 'Active' : 'Off'}
@@ -795,15 +952,101 @@ function AdminAds({ adminId }: { adminId: string }) {
   );
 }
 
+// ─── Visit Sites ───────────────────────────────────────────────────────────────
+function AdminVisitSites({ adminId }: { adminId: string }) {
+  const [sites, setSites] = useState<Array<{ id: string; title: string; url: string; reward_hive: number; is_active: boolean; sort_order: number }>>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ title: '', url: '', reward_hive: '5', sort_order: '0' });
+
+  const load = () => supabase.from('visit_websites').select('*').order('sort_order').then(({ data }) => setSites(data ?? []));
+  useEffect(() => { load(); }, []);
+
+  const handleCreate = async () => {
+    if (!form.title || !form.url) { toast.error('Title and URL required'); return; }
+    await supabase.from('visit_websites').insert({
+      title: form.title,
+      url: form.url,
+      reward_hive: parseFloat(form.reward_hive) || 5,
+      min_watch_seconds: 15,
+      sort_order: parseInt(form.sort_order) || 0,
+      is_active: true,
+    });
+    toast.success('Website added');
+    setShowForm(false);
+    setForm({ title: '', url: '', reward_hive: '5', sort_order: '0' });
+    load();
+    await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'create_visit_site', new_data: { title: form.title, url: form.url } });
+  };
+
+  const handleToggle = async (site: typeof sites[0]) => {
+    await supabase.from('visit_websites').update({ is_active: !site.is_active }).eq('id', site.id);
+    load();
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Delete this website?')) return;
+    await supabase.from('visit_websites').delete().eq('id', id);
+    toast.success('Deleted');
+    load();
+  };
+
+  return (
+    <div className="space-y-3">
+      <motion.button whileTap={{ scale: 0.96 }} onClick={() => setShowForm(!showForm)} className="w-full flex items-center justify-center gap-2 py-3 btn-hive rounded-xl font-bold text-sm">
+        <Plus size={16} /> {showForm ? 'Cancel' : 'Add Website'}
+      </motion.button>
+
+      {showForm && (
+        <GlassCard className="p-4 space-y-3" animate={false}>
+          {[
+            { key: 'title', label: 'Website Title *', placeholder: 'e.g. Partner Site' },
+            { key: 'url', label: 'Website URL *', placeholder: 'https://...' },
+            { key: 'reward_hive', label: 'Reward (Hive)', placeholder: 'e.g. 5', type: 'number' },
+            { key: 'sort_order', label: 'Sort Order', placeholder: 'e.g. 0', type: 'number' },
+          ].map(({ key, label, placeholder, type }) => (
+            <div key={key}>
+              <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">{label}</label>
+              <input type={type ?? 'text'} placeholder={placeholder} value={form[key as keyof typeof form]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none focus:border-hive-gold/30" />
+            </div>
+          ))}
+          <motion.button whileTap={{ scale: 0.96 }} onClick={handleCreate} className="w-full py-3 btn-hive rounded-xl font-bold text-sm">Add Website</motion.button>
+        </GlassCard>
+      )}
+
+      <GlassCard className="divide-y divide-white/[0.04] overflow-hidden" animate={false}>
+        {sites.length === 0 && <p className="text-white/30 text-xs text-center py-6">No websites</p>}
+        {sites.map(s => (
+          <div key={s.id} className="flex items-center gap-2 p-3">
+            <div className="flex-1 min-w-0">
+              <p className={`text-xs font-semibold ${s.is_active ? 'text-white/80' : 'text-white/30 line-through'}`}>{s.title}</p>
+              <p className="text-white/40 text-[10px] truncate">{s.url}</p>
+              <p className="text-hive-gold text-[10px]">+{s.reward_hive} Hive per visit</p>
+            </div>
+            <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleToggle(s)} className={`px-2 py-1 rounded-lg text-[10px] font-bold ${s.is_active ? 'bg-green-500/15 text-green-400' : 'bg-white/[0.06] text-white/40'}`}>
+              {s.is_active ? 'Active' : 'Off'}
+            </motion.button>
+            <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleDelete(s.id)} className="px-2 py-1 rounded-lg bg-red-500/15 text-red-400 text-[10px] font-bold">
+              <Trash2 size={12} />
+            </motion.button>
+          </div>
+        ))}
+      </GlassCard>
+    </div>
+  );
+}
+
 // ─── App Settings ─────────────────────────────────────────────────────────────
 function AdminSettings({ adminId }: { adminId: string }) {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [editKey, setEditKey] = useState('');
   const [editValue, setEditValue] = useState('');
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
 
   const load = async () => {
     const s = await getAppSettings();
     setSettings(s);
+    setMaintenanceMode(s.maintenance_mode === 'true');
   };
   useEffect(() => { load(); }, []);
 
@@ -816,15 +1059,53 @@ function AdminSettings({ adminId }: { adminId: string }) {
     await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'update_setting', new_data: { key: editKey, value: editValue } });
   };
 
+  const handleToggleMaintenance = async () => {
+    const newValue = !maintenanceMode;
+    await updateAppSetting('maintenance_mode', newValue ? 'true' : 'false');
+    setMaintenanceMode(newValue);
+    toast.success(newValue ? 'Maintenance mode enabled' : 'Maintenance mode disabled');
+    await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'toggle_maintenance', new_data: { enabled: newValue } });
+  };
+
   const knownSettings = [
     { key: 'hive_to_usdt', label: 'HIVE → USDT Rate', placeholder: 'e.g. 0.001' },
     { key: 'min_withdrawal_usdt', label: 'Min Withdrawal (USDT)', placeholder: 'e.g. 0.08' },
     { key: 'referral_reward', label: 'Referral Reward (Hive)', placeholder: 'e.g. 25' },
     { key: 'daily_bonus', label: 'Daily Bonus (Hive)', placeholder: 'e.g. 10' },
+    { key: 'required_daily_ads', label: 'Required Daily Ads for Withdraw', placeholder: 'e.g. 20' },
+    { key: 'required_referrals', label: 'Required Referrals for Withdraw', placeholder: 'e.g. 2' },
+    { key: 'required_main_tasks', label: 'Required Main Tasks for Withdraw', placeholder: 'e.g. 2' },
+    { key: 'withdraw_ad_count', label: 'Ads Before Withdrawal', placeholder: 'e.g. 2' },
+    { key: 'visit_site_reward', label: 'Visit Site Reward (Hive)', placeholder: 'e.g. 5' },
+    { key: 'visit_site_min_seconds', label: 'Visit Site Min Seconds', placeholder: 'e.g. 15' },
   ];
 
   return (
     <div className="space-y-3">
+      {/* Maintenance Mode */}
+      <GlassCard className={`p-4 ${maintenanceMode ? 'border-red-500/30 bg-red-500/5' : ''}`} animate={false}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${maintenanceMode ? 'bg-red-500/15' : 'bg-white/[0.06]'}`}>
+              <Wrench size={18} className={maintenanceMode ? 'text-red-400' : 'text-white/30'} />
+            </div>
+            <div>
+              <p className="text-white font-semibold text-sm">Maintenance Mode</p>
+              <p className={`text-[10px] ${maintenanceMode ? 'text-red-400' : 'text-white/40'}`}>
+                {maintenanceMode ? 'App is disabled for users' : 'App is running normally'}
+              </p>
+            </div>
+          </div>
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={handleToggleMaintenance}
+            className={`px-4 py-2 rounded-xl font-bold text-xs ${maintenanceMode ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-white/[0.06] text-white/60 border border-white/10'}`}
+          >
+            {maintenanceMode ? 'Disable' : 'Enable'}
+          </motion.button>
+        </div>
+      </GlassCard>
+
       <GlassCard className="p-4 space-y-3" animate={false}>
         <div className="flex items-center gap-2">
           <Settings size={16} className="text-hive-gold" />

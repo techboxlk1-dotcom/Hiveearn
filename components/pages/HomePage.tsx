@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { Bell, Gift, Trophy, Megaphone, ChevronRight, Wallet, PlayCircle, CheckSquare, Users, Zap, Copy, ExternalLink } from 'lucide-react';
@@ -11,6 +11,7 @@ import { formatHive, hiveToUsdt, formatUsdt, timeAgo } from '@/lib/utils';
 import { getAnnouncements, getUserTransactions } from '@/lib/api';
 import type { Announcement, Transaction } from '@/lib/supabase';
 import { toast } from 'sonner';
+import { useAds } from '@/hooks/useAds';
 
 const stagger = {
   hidden: {},
@@ -25,11 +26,28 @@ export default function HomePage() {
   const { user, unreadCount } = useUser();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const { showAutoAd } = useAds();
+  const initialAdShown = useRef(false);
+  const earnTouchCount = useRef(0);
 
   useEffect(() => {
     getAnnouncements().then(setAnnouncements);
     if (user) getUserTransactions(user.id, undefined, 5).then(setTransactions);
   }, [user]);
+
+  // Auto-open ad on mini app launch
+  useEffect(() => {
+    if (!user || initialAdShown.current) return;
+    initialAdShown.current = true;
+    showAutoAd();
+  }, [user, showAutoAd]);
+
+  const handleEarnMoreTouch = useCallback(() => {
+    earnTouchCount.current += 1;
+    if (earnTouchCount.current % 3 === 0) {
+      showAutoAd();
+    }
+  }, [showAutoAd]);
 
   if (!user) return null;
 
@@ -127,7 +145,7 @@ export default function HomePage() {
         </motion.div>
 
         {/* Earn Actions */}
-        <motion.div variants={item}>
+        <motion.div variants={item} onClick={handleEarnMoreTouch}>
           <h3 className="text-white/40 text-xs font-semibold uppercase tracking-widest mb-3">Earn More</h3>
           <div className="grid grid-cols-3 gap-3">
             {[

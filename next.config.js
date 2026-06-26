@@ -12,6 +12,8 @@ const nextConfig = {
       { protocol: 'https', hostname: 'images.pexels.com' },
       { protocol: 'https', hostname: '**.telegram.org' },
       { protocol: 'https', hostname: 't.me' },
+      { protocol: 'https', hostname: '**.imgbb.com' },
+      { protocol: 'https', hostname: 'i.ibb.co' },
     ],
   },
   // Required for Telegram Mini App iframe embedding

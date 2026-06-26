@@ -25,7 +25,7 @@ export default function LeaderboardPage() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([getTopEarners('all'), getTopReferrers(), getTopAdWatchers()]).then(([e, r, a]) => {
+    Promise.all([getTopEarners(), getTopReferrers(), getTopAdWatchers()]).then(([e, r, a]) => {
       setEarners(e);
       setReferrers(r);
       setAdwatchers(a);

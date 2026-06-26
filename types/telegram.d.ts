@@ -41,8 +41,26 @@ interface TelegramWebApp {
   showConfirm: (message: string, callback?: (confirmed: boolean) => void) => void;
 }
 
+interface AdsgramShowResult {
+  done: boolean;
+  description: string;
+  state: string;
+  error?: boolean;
+}
+
+interface AdsgramController {
+  show: () => Promise<AdsgramShowResult>;
+  destroy: () => void;
+}
+
 interface Window {
   Telegram: {
     WebApp: TelegramWebApp;
   };
+  Adsgram?: {
+    init: (params: { blockId: string; debug?: boolean; debugBannerType?: string }) => AdsgramController;
+  };
+  show_11196790?: () => void;
+  showGiga?: () => Promise<{ success?: boolean }>;
+  __hive_home_ad_callback?: () => void;
 }

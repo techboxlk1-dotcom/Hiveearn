@@ -1,5 +1,6 @@
 import './globals.css';
 import type { Metadata } from 'next';
+import Script from 'next/script';
 import { UserProvider } from '@/contexts/UserContext';
 import { RewardPopupProvider } from '@/components/ui/RewardPopup';
 import { Toaster } from 'sonner';
@@ -20,6 +21,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script src="https://telegram.org/js/telegram-web-app.js" async />
       </head>
       <body className="bg-[#0A0A0A] text-white antialiased">
+        {/* Adsgram SDK */}
+        <Script src="https://sad.adsgram.ai/js/sad.min.js" strategy="afterInteractive" />
+        {/* Monetag SDK */}
+        <Script
+          src="//libtl.com/sdk.js"
+          data-zone="11196790"
+          data-sdk="show_11196790"
+          strategy="afterInteractive"
+        />
+        {/* Gigapub SDK */}
+        <Script src="https://ad.gigapub.tech/script?id=7069" strategy="afterInteractive" />
         <UserProvider>
           <RewardPopupProvider>
             {children}
@@ -29,12 +41,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               toastOptions={{
                 style: {
                   background: 'rgba(20, 20, 20, 0.95)',
-                border: '1px solid rgba(245, 197, 24, 0.2)',
-                color: '#fff',
-                backdropFilter: 'blur(20px)',
-              },
-            }}
-          />
+                  border: '1px solid rgba(245, 197, 24, 0.2)',
+                  color: '#fff',
+                  backdropFilter: 'blur(20px)',
+                },
+              }}
+            />
           </RewardPopupProvider>
         </UserProvider>
       </body>

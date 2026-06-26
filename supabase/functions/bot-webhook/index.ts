@@ -2,12 +2,12 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const BOT_TOKEN = Deno.env.get("BOT_TOKEN") ?? "8969456125:AAFm5CQIhVWpTL6XQDhj-YoVDEojprQWHo4";
 const MINI_APP_URL = Deno.env.get("MINI_APP_URL") ?? "https://t.me/Hiveearnbot/play";
-const COMMUNITY_CHANNEL = "hiveearn";
-const PAYMENT_CHANNEL = "hiveearnpayment";
+const COMMUNITY_CHANNEL = Deno.env.get("COMMUNITY_CHANNEL") ?? "hiveearn";
+const PAYMENT_CHANNEL = Deno.env.get("PAYMENT_CHANNEL") ?? "hiveearnpayment";
 const ADMIN_CHAT_ID = Deno.env.get("ADMIN_CHAT_ID") ?? "5419054691";
-
-// Hive Earn banner photo file_id (uploaded to Telegram)
-const BANNER_PHOTO_ID = "AgACAgQAAyEFAATnTbOFAANaajy2LjLlzvYEvlSUEAlUf0FyE_wAAuENaxs04i1Rt0TOjOZguwMBAAMCAAN5AAM8BA";
+// New banner: either a Telegram file_id or a public URL to the image
+const BANNER_PHOTO = Deno.env.get("BANNER_PHOTO") ?? "https://t.me/Hiveearnbot/play"; // set to file_id or URL of new banner
+const APP_URL = Deno.env.get("APP_URL") ?? "";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,12 +15,23 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-async function tgSendMessage(chatId: string | number, text: string, includeAppButton = true) {
+// Inline keyboard with 3 buttons: Open App, Community, Payment
+function getMainKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }],
+      [
+        { text: "👥 Community", url: `https://t.me/${COMMUNITY_CHANNEL}` },
+        { text: "💳 Payments", url: `https://t.me/${PAYMENT_CHANNEL}` },
+      ],
+    ],
+  };
+}
+
+async function tgSendMessage(chatId: string | number, text: string, includeAppButton = true, customKeyboard?: unknown) {
   const payload: Record<string, unknown> = { chat_id: chatId, text, parse_mode: "HTML" };
   if (includeAppButton) {
-    payload.reply_markup = {
-      inline_keyboard: [[{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }]],
-    };
+    payload.reply_markup = customKeyboard ?? getMainKeyboard();
   }
   await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: "POST",
@@ -29,17 +40,67 @@ async function tgSendMessage(chatId: string | number, text: string, includeAppBu
   });
 }
 
-async function tgSendPhoto(chatId: string | number, photoId: string, caption: string, includeAppButton = true) {
-  const payload: Record<string, unknown> = { chat_id: chatId, photo: photoId, caption, parse_mode: "HTML" };
+async function tgSendPhoto(chatId: string | number, caption: string, includeAppButton = true, customKeyboard?: unknown) {
+  // Use banner photo: if APP_URL is set, use the image from public folder, else use BANNER_PHOTO (file_id or URL)
+  const photoSource = APP_URL
+    ? `${APP_URL}/IMG-20260624-WA0001.jpg`
+    : BANNER_PHOTO;
+
+  const payload: Record<string, unknown> = {
+    chat_id: chatId,
+    photo: photoSource,
+    caption,
+    parse_mode: "HTML",
+  };
+
   if (includeAppButton) {
-    payload.reply_markup = {
-      inline_keyboard: [[{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }]],
-    };
+    payload.reply_markup = customKeyboard ?? getMainKeyboard();
   }
-  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+
+  const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+
+  const data = await res.json();
+
+  // If photo fails, fall back to text message
+  if (!data.ok) {
+    await tgSendMessage(chatId, caption, includeAppButton, customKeyboard);
+  }
+}
+
+async function tgSendPhotoToChannel(channel: string, caption: string, photoUrl: string, buttonName?: string, buttonUrl?: string) {
+  const keyboard = buttonName && buttonUrl
+    ? { inline_keyboard: [[{ text: buttonName, url: buttonUrl }]] }
+    : undefined;
+
+  const payload: Record<string, unknown> = {
+    chat_id: `@${channel}`,
+    photo: photoUrl,
+    caption,
+    parse_mode: "HTML",
+  };
+  if (keyboard) payload.reply_markup = keyboard;
+
+  const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return res.json();
+}
+
+async function tgSendMessageToChannel(channel: string, text: string, buttonName?: string, buttonUrl?: string) {
+  const keyboard = buttonName && buttonUrl
+    ? { inline_keyboard: [[{ text: buttonName, url: buttonUrl }]] }
+    : { inline_keyboard: [[{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }]] };
+
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: `@${channel}`, text, parse_mode: "HTML", reply_markup: keyboard }),
   });
 }
 
@@ -82,10 +143,10 @@ Deno.serve(async (req: Request) => {
         `⚡ Reward codes — redeem codes for bonus Hive\n` +
         `👥 Refer friends — earn up to 150 🍯 Hive per referral + 5% commission\n\n` +
         `<b>Withdrawal:</b>\n` +
-        `Minimum: 0.08 USDT | Network: BSC (BEP20)\n\n` +
+        `Minimum: $0.08 USDT | Network: BSC (BEP20)\n\n` +
         `Tap the button below to open the mini app and start earning! 🚀`;
 
-      await tgSendPhoto(chatId, BANNER_PHOTO_ID, welcomeText, true);
+      await tgSendPhoto(chatId, welcomeText, true);
 
       // Notify admin
       await tgSendMessage(
@@ -114,6 +175,52 @@ Deno.serve(async (req: Request) => {
         true
       );
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Handle broadcast with photo (called from admin panel via edge function invoke)
+    if (update.type === "broadcast_photo") {
+      const { chat_ids, caption, photo_url, button_name, button_url, send_to_channel } = update;
+      let sent = 0, failed = 0;
+
+      const keyboard = button_name && button_url
+        ? { inline_keyboard: [[{ text: button_name, url: button_url }], [{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }]] }
+        : getMainKeyboard();
+
+      for (let i = 0; i < (chat_ids ?? []).length; i += 25) {
+        const batch = chat_ids.slice(i, i + 25);
+        await Promise.all(batch.map(async (cid: number) => {
+          try {
+            const p: Record<string, unknown> = { chat_id: cid, caption, parse_mode: "HTML", reply_markup: keyboard };
+            if (photo_url) p.photo = photo_url;
+            const endpoint = photo_url ? "sendPhoto" : "sendMessage";
+            if (!photo_url) {
+              p.text = caption;
+              delete p.caption;
+            }
+            const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${endpoint}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(p),
+            });
+            const d = await r.json();
+            if (d.ok) sent++; else failed++;
+          } catch { failed++; }
+        }));
+        if (i + 25 < (chat_ids ?? []).length) await new Promise(r => setTimeout(r, 500));
+      }
+
+      // Send to community channel if requested
+      if (send_to_channel) {
+        try {
+          if (photo_url) {
+            await tgSendPhotoToChannel(COMMUNITY_CHANNEL, caption, photo_url, button_name, button_url);
+          } else {
+            await tgSendMessageToChannel(COMMUNITY_CHANNEL, caption, button_name, button_url);
+          }
+        } catch { /* ignore channel errors */ }
+      }
+
+      return new Response(JSON.stringify({ ok: true, sent, failed }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // Handle callback queries

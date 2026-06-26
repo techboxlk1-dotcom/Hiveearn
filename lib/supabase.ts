@@ -25,6 +25,8 @@ export type Database = {
       fraud_logs: { Row: FraudLog; Insert: Partial<FraudLog>; Update: Partial<FraudLog> };
       admin_logs: { Row: AdminLog; Insert: Partial<AdminLog>; Update: Partial<AdminLog> };
       app_settings: { Row: AppSetting; Insert: Partial<AppSetting>; Update: Partial<AppSetting> };
+      visit_websites: { Row: VisitWebsite; Insert: Partial<VisitWebsite>; Update: Partial<VisitWebsite> };
+      website_visits: { Row: WebsiteVisit; Insert: Partial<WebsiteVisit>; Update: Partial<WebsiteVisit> };
     };
   };
 };
@@ -38,6 +40,7 @@ export interface User {
   photo_url: string | null;
   hive_balance: number;
   is_admin: boolean;
+  is_manager: boolean;
   is_suspended: boolean;
   suspension_reason: string | null;
   referral_code: string | null;
@@ -46,6 +49,12 @@ export interface User {
   ip_address: string | null;
   device_fingerprint: string | null;
   ip_flagged: boolean;
+  unclaimed_referral_hive: number;
+  withdrawal_count: number;
+  listed: boolean;
+  total_earned: number;
+  total_withdrawn: number;
+  total_ads_watched: number;
   created_at: string;
   updated_at: string;
 }
@@ -85,6 +94,8 @@ export interface Withdrawal {
   admin_note: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  withdraw_id: string | null;
+  ad_block: number;
   created_at: string;
   updated_at: string;
 }
@@ -127,6 +138,10 @@ export interface AdProvider {
   daily_limit: number;
   is_active: boolean;
   sort_order: number;
+  block_id: string | null;
+  network_type: string | null;
+  min_watch_seconds: number | null;
+  sdk_zone: string | null;
   created_at: string;
 }
 
@@ -233,4 +248,23 @@ export interface AppSetting {
   value: string;
   description: string | null;
   updated_at: string;
+}
+
+export interface VisitWebsite {
+  id: string;
+  name: string;
+  url: string;
+  reward_hive: number;
+  min_watch_seconds: number;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface WebsiteVisit {
+  id: string;
+  user_id: string;
+  website_id: string;
+  hive_earned: number;
+  visited_at: string;
 }
