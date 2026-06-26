@@ -11,8 +11,10 @@ import { supabase } from '@/lib/supabase';
 import type { DailyBonusClaim } from '@/lib/supabase';
 import { timeAgo, canClaimDailyBonus, hoursUntilNextBonus } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useRewardPopup } from '@/components/ui/RewardPopup';
 
 export default function DailyBonusPage() {
+  const { showReward } = useRewardPopup();
   const { user, refreshUser } = useUser();
   const [claiming, setClaiming] = useState(false);
   const [claimed, setClaimed] = useState(false);
@@ -45,6 +47,7 @@ export default function DailyBonusPage() {
         setLastClaim(now);
         setHistory(prev => [{ id: 'new', user_id: user.id, hive_earned: result.hive, streak_day: (prev.length) + 1, claimed_at: now }, ...prev]);
         toast.success(`+${result.hive} Hive earned!`, { icon: '🍯' });
+        showReward(result.hive, 'Daily Bonus!', 'Come back tomorrow for more', '🎁');
         setTimeout(() => { setClaimed(false); setShowConfetti(false); }, 3000);
       } else {
         toast.error(result.message);

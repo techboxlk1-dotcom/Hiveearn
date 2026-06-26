@@ -234,12 +234,6 @@ export default function HomePage() {
                 </motion.div>
               </a>
             </div>
-            <a href={`https://t.me/Hiveearnbot/play`} target="_blank" rel="noopener noreferrer" className="mt-3 block">
-              <motion.div whileTap={{ scale: 0.97 }} className="flex items-center justify-center gap-2 py-2.5 bg-hive-gold/10 border border-hive-gold/20 rounded-xl">
-                <span className="text-hive-gold text-sm">🐝</span>
-                <span className="text-hive-gold text-xs font-bold">Open Mini App</span>
-              </motion.div>
-            </a>
           </GlassCard>
         </motion.div>
       </motion.div>

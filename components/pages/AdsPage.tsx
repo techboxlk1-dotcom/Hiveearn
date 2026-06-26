@@ -9,6 +9,7 @@ import GlassCard from '@/components/ui/GlassCard';
 import { getAdProviders, getTodayAdCount, recordAdWatch } from '@/lib/api';
 import type { AdProvider } from '@/lib/supabase';
 import { toast } from 'sonner';
+import { useRewardPopup } from '@/components/ui/RewardPopup';
 
 const providerMeta: Record<string, { color: string; bg: string; icon: string; url: string }> = {
   adsgram: { color: 'text-blue-400', bg: 'from-blue-900/40', icon: '🎯', url: 'https://t.me/AdsGram' },
@@ -22,6 +23,7 @@ interface ProviderWithCount extends AdProvider {
 
 export default function AdsPage() {
   const { user, refreshUser } = useUser();
+  const { showReward } = useRewardPopup();
   const [providers, setProviders] = useState<ProviderWithCount[]>([]);
   const [loading, setLoading] = useState(true);
   const [watching, setWatching] = useState<string | null>(null);
@@ -64,6 +66,7 @@ export default function AdsPage() {
     const result = await recordAdWatch(user.id, provider.id, provider.reward_per_ad);
     if (result.success) {
       toast.success(result.message, { icon: '🎉' });
+      showReward(provider.reward_per_ad, 'Ad Watched!', `From ${provider.name}`, '📺');
       setPendingVerify(null);
       await refreshUser();
       setProviders(prev => prev.map(p => p.id === provider.id ? { ...p, todayCount: p.todayCount + 1 } : p));

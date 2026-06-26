@@ -9,6 +9,7 @@ import GlassCard from '@/components/ui/GlassCard';
 import { getTasks, getUserTaskCompletions, startTask, verifyTask } from '@/lib/api';
 import type { Task } from '@/lib/supabase';
 import { toast } from 'sonner';
+import { useRewardPopup } from '@/components/ui/RewardPopup';
 
 const tabs = ['main', 'partner', 'community'] as const;
 type TabType = typeof tabs[number];
@@ -19,6 +20,7 @@ interface TaskWithStatus extends Task {
 
 export default function TasksPage() {
   const { user, refreshUser } = useUser();
+  const { showReward } = useRewardPopup();
   const [activeTab, setActiveTab] = useState<TabType>('main');
   const [tasks, setTasks] = useState<TaskWithStatus[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,6 +55,7 @@ export default function TasksPage() {
     const result = await verifyTask(user.id, task.id);
     if (result.success) {
       toast.success(result.message, { icon: '✅' });
+      showReward(result.hive, 'Task Completed!', task.title, '✅');
       setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completion_status: 'verified' } : t));
       await refreshUser();
     } else {

@@ -11,6 +11,7 @@ import { supabase } from '@/lib/supabase';
 import type { RewardCodeClaim, RewardCode } from '@/lib/supabase';
 import { timeAgo } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useRewardPopup } from '@/components/ui/RewardPopup';
 
 interface ClaimWithCode extends RewardCodeClaim {
   reward_codes: RewardCode | null;
@@ -18,6 +19,7 @@ interface ClaimWithCode extends RewardCodeClaim {
 
 export default function RewardCodePage() {
   const { user, refreshUser } = useUser();
+  const { showReward } = useRewardPopup();
   const [code, setCode] = useState('');
   const [claiming, setClaiming] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -46,6 +48,7 @@ export default function RewardCodePage() {
         setCode('');
         await refreshUser();
         toast.success(result.message, { icon: '🎁' });
+        showReward(result.hive, 'Code Redeemed!', 'Reward code bonus', '⚡');
         setTimeout(() => setSuccess(false), 3000);
         // Refresh history
         const { data } = await supabase.from('reward_code_claims').select('*, reward_codes(*)').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20);

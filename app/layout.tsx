@@ -1,6 +1,7 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { UserProvider } from '@/contexts/UserContext';
+import { RewardPopupProvider } from '@/components/ui/RewardPopup';
 import { Toaster } from 'sonner';
 
 export const metadata: Metadata = {
@@ -20,19 +21,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="bg-[#0A0A0A] text-white antialiased">
         <UserProvider>
-          {children}
-          <Toaster
-            theme="dark"
-            position="top-center"
-            toastOptions={{
-              style: {
-                background: 'rgba(20, 20, 20, 0.95)',
+          <RewardPopupProvider>
+            {children}
+            <Toaster
+              theme="dark"
+              position="top-center"
+              toastOptions={{
+                style: {
+                  background: 'rgba(20, 20, 20, 0.95)',
                 border: '1px solid rgba(245, 197, 24, 0.2)',
                 color: '#fff',
                 backdropFilter: 'blur(20px)',
               },
             }}
           />
+          </RewardPopupProvider>
         </UserProvider>
       </body>
     </html>

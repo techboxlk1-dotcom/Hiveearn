@@ -3,20 +3,13 @@ import type { User, Transaction, Withdrawal, RewardCode, Task, Referral, Notific
 import { generateReferralCode, isValidBep20Address, HIVE_TO_USDT } from './utils';
 
 const ADMIN_CHAT_ID = '5419054691';
-const EDGE_FUNCTION_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-bot-message`;
 
 // ─── Telegram Bot Notification (via Edge Function) ───────────────────────────
 
 export async function sendBotMessage(chatId: string | number, text: string, includeAppButton = true): Promise<void> {
   try {
-    await fetch(EDGE_FUNCTION_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text,
-        include_app_button: includeAppButton,
-      }),
+    await supabase.functions.invoke('send-bot-message', {
+      body: { chat_id: chatId, text, include_app_button: includeAppButton },
     });
   } catch {
     // Bot notification failure should never block main app logic
@@ -25,6 +18,18 @@ export async function sendBotMessage(chatId: string | number, text: string, incl
 
 async function notifyAdmin(text: string): Promise<void> {
   await sendBotMessage(ADMIN_CHAT_ID, text, false);
+}
+
+// Check if user is member of a Telegram channel (via edge function)
+export async function checkChannelMembership(userId: number, channel: string): Promise<boolean> {
+  try {
+    const { data } = await supabase.functions.invoke('check-membership', {
+      body: { user_id: userId, channel },
+    });
+    return (data as { is_member?: boolean })?.is_member === true;
+  } catch {
+    return false;
+  }
 }
 
 // Welcome message sent on first login / /start
@@ -441,6 +446,26 @@ export async function recordAdWatch(userId: string, providerId: string, hiveEarn
 
   await supabase.from('ad_watches').insert({ user_id: userId, provider_id: providerId, hive_earned: hiveEarned, completed: true });
   await creditHive(userId, hiveEarned, 'ad', `📺 Ad watched - ${provider.name}`);
+
+  // 5% referral commission — referrer earns 5% of every ad reward
+  const { data: referral } = await supabase.from('referrals').select('referrer_id, status').eq('referred_id', userId).maybeSingle();
+  if (referral && referral.status !== 'fake' && referral.status !== 'blocked') {
+    const commission = Math.round(hiveEarned * 0.05 * 100) / 100; // 5% rounded to 2 decimals
+    if (commission > 0) {
+      await creditHive(referral.referrer_id, commission, 'referral', `🍯 5% commission from referral's ad`);
+      await createNotification(referral.referrer_id, 'commission', '🍯 5% Commission!', `Your referral watched an ad. You earned ${commission} 🍯 Hive as 5% commission!`);
+
+      // Bot message to referrer
+      const { data: referrerUser } = await supabase.from('users').select('telegram_id').eq('id', referral.referrer_id).maybeSingle();
+      if (referrerUser) {
+        await sendBotMessage(
+          referrerUser.telegram_id,
+          `🍯 <b>5% Referral Commission!</b>\n\nYour referral watched an ad and you earned <b>+${commission} 🍯 Hive</b> as commission!\n\nKeep inviting friends to earn more commission on their activity.`
+        );
+      }
+    }
+  }
+
   await checkReferralAdMilestones(userId);
 
   return { success: true, message: `+${hiveEarned} Hive earned!` };
@@ -542,6 +567,19 @@ export async function verifyTask(userId: string, taskId: string): Promise<{ succ
 
   const { data: task } = await supabase.from('tasks').select('*').eq('id', taskId).maybeSingle();
   if (!task) return { success: false, hive: 0, message: 'Task not found' };
+
+  // If task has a channel to join, verify membership
+  const channelToCheck = task.telegram_username || (task.telegram_link ? task.telegram_link.match(/t\.me\/(?:joinchat\/)?(@?)([a-zA-Z0-9_]+)/)?.[2] : null);
+  if (channelToCheck) {
+    const { data: user } = await supabase.from('users').select('telegram_id').eq('id', userId).maybeSingle();
+    if (user) {
+      const isMember = await checkChannelMembership(user.telegram_id, channelToCheck);
+      if (!isMember) {
+        const joinLink = task.telegram_link || `https://t.me/${channelToCheck}`;
+        return { success: false, hive: 0, message: `Please join the channel first: ${joinLink}` };
+      }
+    }
+  }
 
   await supabase.from('task_completions').update({ status: 'verified', hive_earned: task.reward_amount, verified_at: new Date().toISOString() }).eq('user_id', userId).eq('task_id', taskId);
   await creditHive(userId, task.reward_amount, 'task', `✅ Task: ${task.title}`);
