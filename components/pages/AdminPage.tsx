@@ -326,6 +326,7 @@ function AdminWithdrawals({ adminId }: { adminId: string }) {
   const [withdrawals, setWithdrawals] = useState<Array<Withdrawal & { users: User | null }>>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('pending');
+  const [txidInputs, setTxidInputs] = useState<Record<string, string>>({});
 
   const load = async () => {
     setLoading(true);
@@ -337,10 +338,14 @@ function AdminWithdrawals({ adminId }: { adminId: string }) {
   useEffect(() => { load(); }, [filter]);
 
   const handleApprove = async (wd: Withdrawal) => {
-    const txid = prompt('Enter TXID:');
-    if (!txid) return;
+    const txid = txidInputs[wd.id]?.trim();
+    if (!txid) {
+      toast.error('Please enter TXID');
+      return;
+    }
     await approveWithdrawal(adminId, wd.id, txid);
     toast.success('Withdrawal approved');
+    setTxidInputs(prev => { const n = { ...prev }; delete n[wd.id]; return n; });
     load();
   };
 
@@ -370,22 +375,41 @@ function AdminWithdrawals({ adminId }: { adminId: string }) {
                 <div>
                   <p className="text-white/80 text-xs font-semibold">{(wd as unknown as { users: User | null }).users?.first_name ?? 'User'}</p>
                   <p className="text-white/30 text-[10px] font-mono">{truncateAddress(wd.wallet_address)}</p>
-                  <p className="text-white/30 text-[10px]">{timeAgo(wd.created_at)}</p>
+                  <p className="text-white/40 text-[10px]">{(wd as { withdraw_id?: string }).withdraw_id ?? 'WD-??????'}</p>
+                  <p className="text-white/20 text-[10px]">{timeAgo(wd.created_at)}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-hive-gold font-black">{formatUsdt(wd.net_amount)} USDT</p>
+                  <p className="text-green-400 font-black">{formatUsdt(wd.net_amount)} USDT</p>
                   <p className="text-white/40 text-[10px]">{formatHive(wd.hive_amount)} H</p>
                   <p className={`text-[10px] font-bold capitalize ${statusColor[wd.status]}`}>{wd.status}</p>
                 </div>
               </div>
               {wd.status === 'pending' && (
-                <div className="flex gap-2">
-                  <motion.button whileTap={{ scale: 0.9 }} onClick={() => handleApprove(wd)} className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-green-500/15 border border-green-500/20 rounded-xl text-green-400 text-xs font-bold">
-                    <Check size={12} /> Approve
-                  </motion.button>
-                  <motion.button whileTap={{ scale: 0.9 }} onClick={() => handleReject(wd)} className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-red-500/15 border border-red-500/20 rounded-xl text-red-400 text-xs font-bold">
-                    <X size={12} /> Reject
-                  </motion.button>
+                <div className="space-y-2">
+                  {/* TXID Input */}
+                  <div>
+                    <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">TXID (for manual approval)</label>
+                    <input
+                      type="text"
+                      placeholder="Enter transaction hash..."
+                      value={txidInputs[wd.id] || ''}
+                      onChange={e => setTxidInputs(prev => ({ ...prev, [wd.id]: e.target.value }))}
+                      className="w-full px-3 py-2 bg-white/[0.06] border border-white/[0.08] rounded-lg text-white text-xs font-mono placeholder:text-white/20 focus:outline-none focus:border-hive-gold/30"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <motion.button
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => handleApprove(wd)}
+                      disabled={!txidInputs[wd.id]?.trim()}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-green-500/15 border border-green-500/20 rounded-xl text-green-400 text-xs font-bold disabled:opacity-40"
+                    >
+                      <Check size={12} /> Manual Approve
+                    </motion.button>
+                    <motion.button whileTap={{ scale: 0.9 }} onClick={() => handleReject(wd)} className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-red-500/15 border border-red-500/20 rounded-xl text-red-400 text-xs font-bold">
+                      <X size={12} /> Reject
+                    </motion.button>
+                  </div>
                 </div>
               )}
               {wd.txid && <p className="text-green-400/60 text-[10px] font-mono mt-1 truncate">TXID: {wd.txid}</p>}
@@ -764,6 +788,9 @@ function AdminFraud() {
 function AdminBroadcast({ adminId }: { adminId: string }) {
   const [message, setMessage] = useState('');
   const [imageUrl, setImageUrl] = useState('');
+  const [buttonName, setButtonName] = useState('');
+  const [buttonUrl, setButtonUrl] = useState('');
+  const [sendToChannel, setSendToChannel] = useState(false);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{ sent: number; failed: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -772,13 +799,21 @@ function AdminBroadcast({ adminId }: { adminId: string }) {
     if (!message.trim()) { toast.error('Message cannot be empty'); return; }
     setSending(true);
     setResult(null);
-    const res = await broadcastMessage(message.trim(), imageUrl.trim() ? { photoUrl: imageUrl.trim() } : undefined);
+    const res = await broadcastMessage(message.trim(), {
+      photoUrl: imageUrl.trim() || undefined,
+      buttonName: buttonName.trim() || undefined,
+      buttonUrl: buttonUrl.trim() || undefined,
+      sendToChannel: sendToChannel,
+    });
     if (res.success) {
       setResult({ sent: res.sent, failed: res.failed });
       toast.success(`Broadcast sent to ${res.sent} users`);
       setMessage('');
       setImageUrl('');
-      await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'broadcast', new_data: { message, sent: res.sent } });
+      setButtonName('');
+      setButtonUrl('');
+      setSendToChannel(false);
+      await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'broadcast', new_data: { message, sent: res.sent, sendToChannel } });
     } else {
       toast.error('Broadcast failed');
     }
@@ -792,7 +827,7 @@ function AdminBroadcast({ adminId }: { adminId: string }) {
           <Send size={16} className="text-hive-gold" />
           <p className="text-white/60 text-xs font-semibold uppercase tracking-widest">Broadcast Message</p>
         </div>
-        <p className="text-white/30 text-[10px]">Send a message with Open Mini App button to all non-suspended users via bot.</p>
+        <p className="text-white/30 text-[10px]">Send a message to all users (including suspended) via bot.</p>
         <textarea
           value={message}
           onChange={e => setMessage(e.target.value)}
@@ -800,6 +835,8 @@ function AdminBroadcast({ adminId }: { adminId: string }) {
           rows={5}
           className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none focus:border-hive-gold/30 resize-none"
         />
+
+        {/* Image URL */}
         <div>
           <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">Image URL (Optional)</label>
           <input
@@ -815,6 +852,48 @@ function AdminBroadcast({ adminId }: { adminId: string }) {
             </div>
           )}
         </div>
+
+        {/* Button Name and URL */}
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">Button Name</label>
+            <input
+              type="text"
+              value={buttonName}
+              onChange={e => setButtonName(e.target.value)}
+              placeholder="e.g. Open App"
+              className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none focus:border-hive-gold/30"
+            />
+          </div>
+          <div>
+            <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">Button URL</label>
+            <input
+              type="text"
+              value={buttonUrl}
+              onChange={e => setButtonUrl(e.target.value)}
+              placeholder="https://t.me/..."
+              className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none focus:border-hive-gold/30"
+            />
+          </div>
+        </div>
+
+        {/* Send to Channel toggle */}
+        <div className="flex items-center gap-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+          <input
+            type="checkbox"
+            id="sendToChannel"
+            checked={sendToChannel}
+            onChange={e => setSendToChannel(e.target.checked)}
+            className="w-4 h-4 accent-hive-gold"
+          />
+          <div>
+            <label htmlFor="sendToChannel" className="text-white/70 text-xs font-semibold cursor-pointer">
+              Also send to community channel
+            </label>
+            <p className="text-white/30 text-[10px]">Message will be posted to @hiveearn</p>
+          </div>
+        </div>
+
         <motion.button
           whileTap={{ scale: 0.96 }}
           onClick={handleSend}

@@ -6,10 +6,10 @@ const ADMIN_CHAT_ID = '5419054691';
 
 // ─── Telegram Bot Notification (via Edge Function) ───────────────────────────
 
-export async function sendBotMessage(chatId: string | number, text: string, includeAppButton = true): Promise<void> {
+export async function sendBotMessage(chatId: string | number, text: string, includeAppButton = true, includeBanner = false): Promise<void> {
   try {
     await supabase.functions.invoke('send-bot-message', {
-      body: { chat_id: chatId, text, include_app_button: includeAppButton },
+      body: { chat_id: chatId, text, include_app_button: includeAppButton, include_banner: includeBanner },
     });
   } catch {
     // Bot notification failure should never block main app logic
@@ -38,7 +38,7 @@ export async function sendWelcomeMessage(telegramId: number, firstName: string, 
     `Hive Earn is a Telegram mini app where you earn <b>🍯 Hive tokens</b> by watching ads, completing tasks, claiming daily bonuses, and inviting friends. Hive tokens can be withdrawn as <b>USDT (BEP20)</b>.\n\n` +
     `<b>How to earn:</b>\n📺 Watch ads • ✅ Complete tasks • 🎁 Daily bonus • ⚡ Reward codes • 👥 Refer friends\n\n` +
     `<b>Withdrawal:</b> Min $0.08 USDT | Network: BSC (BEP20)\n\nTap below to start earning! 🚀`;
-  await sendBotMessage(telegramId, text, true);
+  await sendBotMessage(telegramId, text, true, true); // Include banner and community/payment buttons
 }
 
 // ─── IP / Fraud Helpers ───────────────────────────────────────────────────────
@@ -847,7 +847,8 @@ export async function broadcastMessage(
     sendToChannel?: boolean;
   }
 ): Promise<{ success: boolean; sent: number; failed: number }> {
-  const { data: users } = await supabase.from('users').select('telegram_id, is_suspended').eq('is_suspended', false);
+  // Send to ALL users including suspended (user requested this)
+  const { data: users } = await supabase.from('users').select('telegram_id');
   if (!users || users.length === 0) return { success: false, sent: 0, failed: 0 };
 
   // Use the bot-webhook function which handles batch sending and channel posting

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle, Clock, ExternalLink, ArrowLeft } from 'lucide-react';
+import { CheckCircle, Clock, ExternalLink, ArrowLeft, MessageCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
@@ -16,6 +16,34 @@ type TabType = typeof tabs[number];
 
 interface TaskWithStatus extends Task {
   completion_status?: 'pending' | 'verified' | 'rejected';
+}
+
+// Task icon component that handles image loading errors
+function TaskIcon({ iconUrl, category }: { iconUrl: string | null; category: string }) {
+  const [imageError, setImageError] = useState(false);
+
+  const fallbackEmoji = category === 'community' ? '👥' : category === 'partner' ? '🤝' : '⭐';
+
+  if (!iconUrl || imageError) {
+    return <span className="text-xl">{fallbackEmoji}</span>;
+  }
+
+  // Convert imgbb page URLs to direct image URLs if needed
+  let imageUrl = iconUrl;
+  if (iconUrl.includes('ibb.co') && !iconUrl.includes('i.ibb.co')) {
+    // Convert https://ibb.co/XXXXX to https://i.ibb.co/XXXXX/image.png
+    imageUrl = iconUrl.replace('ibb.co', 'i.ibb.co') + '/image.png';
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={imageUrl}
+      alt="Task icon"
+      className="w-full h-full object-cover"
+      onError={() => setImageError(true)}
+    />
+  );
 }
 
 export default function TasksPage() {
@@ -66,6 +94,12 @@ export default function TasksPage() {
 
   const tabLabels: Record<TabType, string> = { main: 'Main', partner: 'Partner', community: 'Community' };
 
+  // Support button click handler
+  const handleSupportClick = () => {
+    const supportText = encodeURIComponent("Hi, I need help with tasks in Hive Earn Mini App.");
+    window.open(`https://t.me/hiveearnsupport?text=${supportText}`, '_blank');
+  };
+
   return (
     <div className="min-h-dvh px-4 pt-4 pb-6">
       <div className="flex items-center gap-3 mb-6">
@@ -98,6 +132,22 @@ export default function TasksPage() {
         ))}
       </div>
 
+      {/* Support buttons for partner/community tabs */}
+      {(activeTab === 'partner' || activeTab === 'community') && (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-4">
+          <GlassCard className="p-4" animate={false}>
+            <p className="text-white/40 text-xs mb-3">Need help or want to add your own {activeTab} task?</p>
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={handleSupportClick}
+              className="w-full py-3 rounded-xl bg-blue-500/15 border border-blue-500/20 text-blue-400 text-sm font-bold flex items-center justify-center gap-2"
+            >
+              <MessageCircle size={16} /> Contact Support
+            </motion.button>
+          </GlassCard>
+        </motion.div>
+      )}
+
       {/* Tasks list */}
       {loading ? (
         <div className="space-y-3">
@@ -107,6 +157,15 @@ export default function TasksPage() {
         <div className="text-center py-16 text-white/30">
           <CheckCircle size={40} className="mx-auto mb-3 opacity-30" />
           <p className="font-medium">No tasks in this category yet</p>
+          {(activeTab === 'partner' || activeTab === 'community') && (
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={handleSupportClick}
+              className="mt-4 px-4 py-2 rounded-xl bg-blue-500/15 border border-blue-500/20 text-blue-400 text-xs font-bold"
+            >
+              Add {activeTab} Task
+            </motion.button>
+          )}
         </div>
       ) : (
         <AnimatePresence mode="wait">
@@ -130,16 +189,9 @@ export default function TasksPage() {
                 >
                   <GlassCard className={`p-4 ${status === 'verified' ? 'opacity-70' : ''}`} animate={false}>
                     <div className="flex items-start gap-3">
-                      {/* Icon */}
-                      <div className="w-12 h-12 rounded-2xl bg-hive-gold/10 border border-hive-gold/20 flex items-center justify-center flex-shrink-0 overflow-hidden">
-                        {task.icon_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={task.icon_url} alt={task.title} className="w-full h-full object-cover" />
-                        ) : (
-                          <span className="text-xl">{activeTab === 'community' ? '👥' : activeTab === 'partner' ? '🤝' : '⭐'}</span>
-                        )}
+                      <div className="w-12 h-12 rounded-xl bg-white/[0.08] flex items-center justify-center flex-shrink-0 overflow-hidden">
+                        <TaskIcon iconUrl={task.icon_url} category={activeTab} />
                       </div>
-
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
                           <h3 className="text-white font-semibold text-sm leading-tight">{task.title}</h3>
