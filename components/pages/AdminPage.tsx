@@ -332,15 +332,28 @@ function AdminUsers({ adminId }: { adminId: string }) {
 
 // ─── Withdrawals ──────────────────────────────────────────────────────────────
 function AdminWithdrawals({ adminId }: { adminId: string }) {
-  const [withdrawals, setWithdrawals] = useState<Array<Withdrawal & { users: User | null }>>([]);
+  const [withdrawals, setWithdrawals] = useState<Array<Withdrawal & { user: User | null }>>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('pending');
   const [txidInputs, setTxidInputs] = useState<Record<string, string>>({});
+  const [pendingCount, setPendingCount] = useState(0);
 
   const load = async () => {
     setLoading(true);
-    const { data } = await supabase.from('withdrawals').select('*, users(*)').eq('status', filter).order('created_at', { ascending: false }).limit(30);
-    setWithdrawals((data as Array<Withdrawal & { users: User | null }>) ?? []);
+    // Use explicit FK hint: !user_id to disambiguate from reviewed_by FK
+    const { data } = await supabase.from('withdrawals')
+      .select('*, user:users!user_id(*)')
+      .eq('status', filter)
+      .order('created_at', { ascending: false })
+      .limit(30);
+    setWithdrawals((data as unknown as Array<Withdrawal & { user: User | null }>) ?? []);
+
+    // Also fetch pending count for badge
+    const { count } = await supabase.from('withdrawals')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'pending');
+    setPendingCount(count ?? 0);
+
     setLoading(false);
   };
 
@@ -404,7 +417,7 @@ function AdminWithdrawals({ adminId }: { adminId: string }) {
             <GlassCard key={wd.id} className="p-3" animate={false}>
               <div className="flex items-start justify-between mb-2">
                 <div>
-                  <p className="text-white/80 text-xs font-semibold">{(wd as unknown as { users: User | null }).users?.first_name ?? 'User'}</p>
+                  <p className="text-white/80 text-xs font-semibold">{(wd as unknown as { user: User | null }).user?.first_name ?? 'User'}</p>
                   <p className="text-white/30 text-[10px] font-mono">{truncateAddress(wd.wallet_address)}</p>
                   <p className="text-white/40 text-[10px]">{(wd as { withdraw_id?: string }).withdraw_id ?? 'WD-??????'}</p>
                   <p className="text-white/20 text-[10px]">{timeAgo(wd.created_at)}</p>

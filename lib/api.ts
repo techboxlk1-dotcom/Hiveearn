@@ -844,6 +844,9 @@ export async function approveWithdrawal(adminId: string, withdrawalId: string, t
   await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'approve_withdrawal', target_type: 'withdrawal', target_id: withdrawalId, new_data: { txid } });
   await createNotification(wd.user_id, 'withdraw_approved', '✅ Withdrawal Approved!', `Your withdrawal has been approved. TXID: ${txid}`, { txid, amount: wd.net_amount });
 
+  // Add transaction history entry for approval
+  await supabase.from('transactions').insert({ user_id: wd.user_id, type: 'withdraw', amount: -wd.hive_amount, description: `✅ Withdrawal approved — ${wd.net_amount} USDT sent`, reference_id: wd.id, status: 'completed' });
+
   // Update total paid
   const settings = await getAppSettings();
   const currentPaid = parseFloat(settings['total_paid_usdt'] ?? '0');

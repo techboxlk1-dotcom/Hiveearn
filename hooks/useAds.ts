@@ -13,6 +13,11 @@ export interface RandomAdResult {
   network: string;
 }
 
+export interface AdCloseResult {
+  opened: boolean;
+  closed: boolean;
+}
+
 export function useAds() {
   const adsgramReady = useCallback(() => typeof window !== 'undefined' && !!window.Adsgram, []);
 
@@ -48,51 +53,9 @@ export function useAds() {
     });
   }, [adsgramReady]);
 
-  // Monetag: shows ad and waits minimum 5 seconds to confirm it actually played
-  const showMonetag = useCallback((): Promise<{ opened: boolean }> => {
-    return new Promise((resolve) => {
-      if (typeof window === 'undefined' || !window.show_11196790) {
-        resolve({ opened: false });
-        return;
-      }
-      try {
-        window.show_11196790();
-        // Wait 5 seconds before resolving — ensures the ad actually displayed
-        // If the SDK throws or the function doesn't exist, we resolve immediately with false
-        setTimeout(() => resolve({ opened: true }), 5000);
-      } catch {
-        resolve({ opened: false });
-      }
-    });
-  }, []);
-
-  // Gigapub: shows ad and waits to confirm
-  const showGigapub = useCallback((): Promise<{ success: boolean }> => {
-    return new Promise((resolve) => {
-      if (typeof window === 'undefined' || !window.showGiga) {
-        resolve({ success: false });
-        return;
-      }
-      try {
-        const result = window.showGiga!();
-        if (result && typeof result.then === 'function') {
-          result
-            .then(() => resolve({ success: true }))
-            .catch(() => resolve({ success: false }));
-        } else {
-          // If showGiga doesn't return a promise, wait 5s then resolve
-          setTimeout(() => resolve({ success: true }), 5000);
-        }
-      } catch {
-        resolve({ success: false });
-      }
-    });
-  }, []);
-
   // Random network ad — returns whether ad actually played
   const showRandomAd = useCallback(async (): Promise<RandomAdResult> => {
     const options = ['adsgram', 'monetag', 'gigapub'];
-    // Shuffle and try each until one works
     const shuffled = [...options].sort(() => Math.random() - 0.5);
 
     for (const pick of shuffled) {
@@ -106,7 +69,6 @@ export function useAds() {
       if (pick === 'monetag' && typeof window !== 'undefined' && window.show_11196790) {
         try {
           window.show_11196790();
-          // Wait 5 seconds to confirm ad played
           await new Promise(r => setTimeout(r, 5000));
           return { success: true, network: 'monetag' };
         } catch { /* try next */ }
@@ -126,5 +88,125 @@ export function useAds() {
     return { success: false, network: 'none' };
   }, [adsgramReady]);
 
-  return { showAutoAd, showRewardAd, showMonetag, showGigapub, showRandomAd, adsgramReady };
+  // ─── Concurrent ad display with close detection ────────────────────────────
+  //
+  // This function calls the ad SDK AND sets up close detection simultaneously.
+  // It returns a promise that resolves when the ad is closed/skipped.
+  // The caller should race this against a countdown timer:
+  //   - If timer completes first → ad watched → give reward
+  //   - If ad closes first → ad skipped → no reward
+  //
+  // For Adsgram: uses the SDK's own promise (resolves on close)
+  // For Monetag/Gigapub: uses blur/focus + visibilitychange to detect close
+
+  const startAdAndDetectClose = useCallback((provider: {
+    block_id?: string | null;
+    network_type?: string | null;
+    slug?: string | null;
+  }): Promise<AdCloseResult> => {
+    return new Promise((resolve) => {
+      let resolved = false;
+      let adOpened = false;
+      let listenersAttached = false;
+      let noOpenTimer: ReturnType<typeof setTimeout> | undefined;
+      let safetyTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const cleanup = () => {
+        if (listenersAttached) {
+          window.removeEventListener('blur', onBlur);
+          window.removeEventListener('focus', onFocus);
+          document.removeEventListener('visibilitychange', onVisChange);
+          listenersAttached = false;
+        }
+      };
+
+      const finish = (result: AdCloseResult) => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        if (noOpenTimer) clearTimeout(noOpenTimer);
+        if (safetyTimer) clearTimeout(safetyTimer);
+        resolve(result);
+      };
+
+      const onBlur = () => { adOpened = true; };
+      const onFocus = () => { finish({ opened: adOpened, closed: true }); };
+      const onVisChange = () => {
+        if (document.visibilityState === 'hidden') adOpened = true;
+        if (document.visibilityState === 'visible') finish({ opened: adOpened, closed: true });
+      };
+
+      const blockId = provider.block_id ?? '';
+      const isAdsgram = blockId === '36138' || blockId === 'int-36139' ||
+        (provider.network_type === 'adsgram' && (provider.slug === 'adsgram' || !provider.slug));
+      const isMonetag = provider.network_type === 'monetag' || provider.slug === 'monetag';
+      const isGigapub = provider.network_type === 'gigapub' || provider.slug === 'gigapub';
+
+      // For Adsgram: use SDK's own close callback
+      if (isAdsgram && adsgramReady()) {
+        try {
+          const bid = blockId === '36138' ? '36138' : 'int-36139';
+          const controller = window.Adsgram!.init({ blockId: bid });
+          controller.show()
+            .then((result) => {
+              // Adsgram resolves when ad closes — check if it was watched
+              const opened = !result.error;
+              finish({ opened, closed: true });
+            })
+            .catch(() => {
+              finish({ opened: false, closed: true });
+            });
+        } catch {
+          finish({ opened: false, closed: true });
+        }
+        return;
+      }
+
+      // For Monetag/Gigapub: detect close via blur/focus + visibilitychange
+      if ((isMonetag || isGigapub) && typeof window !== 'undefined') {
+        window.addEventListener('blur', onBlur);
+        window.addEventListener('focus', onFocus);
+        document.addEventListener('visibilitychange', onVisChange);
+        listenersAttached = true;
+
+        try {
+          if (isMonetag && window.show_11196790) {
+            window.show_11196790();
+          } else if (isGigapub && window.showGiga) {
+            const result = window.showGiga();
+            if (result && typeof result.then === 'function') {
+              result.then(() => finish({ opened: adOpened, closed: true }))
+                    .catch(() => finish({ opened: false, closed: true }));
+            }
+          } else {
+            // SDK function doesn't exist
+            finish({ opened: false, closed: true });
+            return;
+          }
+        } catch {
+          finish({ opened: false, closed: true });
+          return;
+        }
+
+        // If no blur event within 4 seconds, ad probably didn't open
+        const noOpenTimer = setTimeout(() => {
+          if (!resolved && !adOpened) {
+            finish({ opened: false, closed: true });
+          }
+        }, 4000);
+
+        // Safety timeout: 120 seconds
+        const safetyTimer = setTimeout(() => {
+          finish({ opened: adOpened, closed: true });
+        }, 120000);
+
+        return;
+      }
+
+      // Unknown provider
+      finish({ opened: false, closed: true });
+    });
+  }, [adsgramReady]);
+
+  return { showAutoAd, showRewardAd, showRandomAd, startAdAndDetectClose, adsgramReady };
 }

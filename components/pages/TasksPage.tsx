@@ -22,6 +22,7 @@ interface TaskWithStatus extends Task {
 // Task icon component — handles imgbb URLs and direct image URLs
 function TaskIcon({ iconUrl, category }: { iconUrl: string | null; category: string }) {
   const [imageError, setImageError] = useState(false);
+  const [retryUrl, setRetryUrl] = useState<string | null>(null);
 
   const fallbackEmoji = category === 'community' ? '👥' : category === 'partner' ? '🤝' : '⭐';
 
@@ -29,40 +30,32 @@ function TaskIcon({ iconUrl, category }: { iconUrl: string | null; category: str
     return <span className="text-xl">{fallbackEmoji}</span>;
   }
 
-  // Handle imgbb URLs:
-  // Direct image URLs (i.ibb.co/xxx/image.png) work as-is
-  // Page URLs (ibb.co/xxx) need conversion, but we can't reliably guess the extension
-  // So we try the URL as-is first, and if it's a page URL, try common patterns
+  // Normalize imgbb URLs to direct image format
   let imageUrl = iconUrl.trim();
-
-  // If it's an ibb.co page URL (not direct image), try converting
   if (imageUrl.includes('ibb.co') && !imageUrl.includes('i.ibb.co')) {
-    // Try direct image URL format — imgbb direct URLs are i.ibb.co/<code>/<filename>.<ext>
-    // Since we don't know the extension, try .png and .jpg via onError fallback
     imageUrl = imageUrl.replace('ibb.co', 'i.ibb.co');
-    // If no file extension, try appending common ones
     if (!imageUrl.match(/\.(png|jpg|jpeg|gif|webp)$/i)) {
       imageUrl = imageUrl + '.png';
     }
   }
 
+  // Use retryUrl if set (e.g., .jpg fallback after .png fails)
+  const finalUrl = retryUrl ?? imageUrl;
+
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={imageUrl}
+      key={finalUrl}
+      src={finalUrl}
       alt="Task icon"
       className="w-full h-full object-cover"
       onError={() => {
-        // Try .jpg if .png fails (for imgbb URLs)
-        if (imageUrl.endsWith('.png')) {
-          imageUrl = imageUrl.replace('.png', '.jpg');
-          // Force re-render by changing key — but since we can't, use a different approach
-          setImageError(false);
-          // Use direct DOM manipulation as fallback
-          const img = document.querySelector(`img[src="${imageUrl.replace('.jpg', '.png')}"]`) as HTMLImageElement | null;
-          if (img) img.src = imageUrl;
+        // If .png fails, try .jpg
+        if (finalUrl.endsWith('.png') && !retryUrl) {
+          setRetryUrl(finalUrl.replace('.png', '.jpg'));
           return;
         }
+        // If .jpg fails too, show fallback emoji
         setImageError(true);
       }}
     />
