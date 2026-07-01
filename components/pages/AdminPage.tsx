@@ -2,27 +2,29 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, DollarSign, CheckSquare, Megaphone, Gift, Shield, BarChart2, Plus, Check, X, Search, Trash2, Eye, ChevronLeft, Send, Tv, Settings, Globe, UserCog, Wrench, Activity, Star, StarOff } from 'lucide-react';
+import { Users, DollarSign, CheckSquare, Megaphone, Gift, Shield, BarChart2, Plus, Check, X, Search, Trash2, Eye, ChevronLeft, Send, Tv, Settings, Globe, UserCog, Wrench, Activity, Star, StarOff, Zap, Edit2, Save, MessageCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import { supabase } from '@/lib/supabase';
 import type { User, Withdrawal, RewardCode, Task, Announcement, FraudLog, AdminLog } from '@/lib/supabase';
-import { getAllUsers, approveWithdrawal, rejectWithdrawal, createRewardCode, suspendUser, unsuspendUser, createAnnouncement, createTask, getAdminStats, blockIp, broadcastMessage, createAdProvider, updateAdProvider, deleteAdProvider, updateAppSetting, getAppSettings, setManager, listUser, unlistUser, getUserActivity } from '@/lib/api';
+import { getAllUsers, approveWithdrawal, rejectWithdrawal, autoApproveWithdrawal, createRewardCode, suspendUser, unsuspendUser, createAnnouncement, createTask, updateTask, getAdminStats, blockIp, broadcastMessage, createAdProvider, updateAdProvider, deleteAdProvider, updateAppSetting, getAppSettings, setManager, listUser, unlistUser, getUserActivity } from '@/lib/api';
 import { formatHive, formatUsdt, hiveToUsdt, timeAgo, truncateAddress } from '@/lib/utils';
 import { toast } from 'sonner';
 
 type AdminSection = 'dashboard' | 'users' | 'withdrawals' | 'reward_codes' | 'tasks' | 'announcements' | 'fraud' | 'logs' | 'broadcast' | 'ads' | 'visit_sites' | 'settings';
 
 export default function AdminPage() {
-  const { user, isAdmin } = useUser();
+  const { user, isAdmin, isManager } = useUser();
   const [section, setSection] = useState<AdminSection>('dashboard');
   const [stats, setStats] = useState({ totalUsers: 0, pendingWithdrawals: 0, totalTasks: 0, settings: [] as Array<{ key: string; value: string }> });
 
-  useEffect(() => { if (user && isAdmin) getAdminStats().then(s => setStats(s as typeof stats)); }, [user, isAdmin]);
+  const canAccess = isAdmin || isManager;
+
+  useEffect(() => { if (user && canAccess) getAdminStats().then(s => setStats(s as typeof stats)); }, [user, canAccess]);
 
   if (!user) return null;
-  if (!isAdmin) {
+  if (!canAccess) {
     return (
       <div className="flex flex-col items-center justify-center min-h-dvh px-4">
         <Shield size={48} className="text-red-400 mb-4" />
@@ -33,7 +35,10 @@ export default function AdminPage() {
     );
   }
 
-  const navItems = [
+  // Managers see limited nav: users, withdrawals, tasks, broadcast only
+  const managerSections = ['users', 'withdrawals', 'tasks', 'broadcast'] as const;
+
+  const allNavItems = [
     { id: 'dashboard', label: 'Dashboard', icon: BarChart2 },
     { id: 'users', label: 'Users', icon: Users },
     { id: 'withdrawals', label: 'Withdrawals', icon: DollarSign },
@@ -48,6 +53,10 @@ export default function AdminPage() {
     { id: 'logs', label: 'Admin Logs', icon: Eye },
   ] as const;
 
+  const navItems = isManager && !isAdmin
+    ? allNavItems.filter(item => (managerSections as readonly string[]).includes(item.id))
+    : allNavItems;
+
   return (
     <div className="min-h-dvh bg-[#0A0A0A]">
       {/* Header */}
@@ -61,8 +70,8 @@ export default function AdminPage() {
           <Shield size={18} className="text-red-400" />
           <h1 className="text-white font-bold">Admin Panel</h1>
         </div>
-        <div className="ml-auto flex items-center gap-1.5 px-2.5 py-1 bg-red-500/15 rounded-full">
-          <span className="text-red-400 text-xs font-bold">ADMIN</span>
+        <div className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-full ${isAdmin ? 'bg-red-500/15' : 'bg-blue-500/15'}`}>
+          <span className={`${isAdmin ? 'text-red-400' : 'text-blue-400'} text-xs font-bold`}>{isAdmin ? 'ADMIN' : 'MANAGER'}</span>
         </div>
       </div>
 
@@ -343,18 +352,40 @@ function AdminWithdrawals({ adminId }: { adminId: string }) {
       toast.error('Please enter TXID');
       return;
     }
-    await approveWithdrawal(adminId, wd.id, txid);
-    toast.success('Withdrawal approved');
-    setTxidInputs(prev => { const n = { ...prev }; delete n[wd.id]; return n; });
-    load();
+    try {
+      await approveWithdrawal(adminId, wd.id, txid);
+      toast.success('Withdrawal approved');
+      setTxidInputs(prev => { const n = { ...prev }; delete n[wd.id]; return n; });
+      load();
+    } catch {
+      toast.error('Failed to approve withdrawal');
+    }
+  };
+
+  const handleAutoApprove = async (wd: Withdrawal) => {
+    try {
+      const result = await autoApproveWithdrawal(adminId, wd.id);
+      if (result.success) {
+        toast.success(`Auto-approved! TXID: ${result.txid.slice(0, 16)}...`);
+        load();
+      } else {
+        toast.error(result.message);
+      }
+    } catch {
+      toast.error('Failed to auto-approve withdrawal');
+    }
   };
 
   const handleReject = async (wd: Withdrawal) => {
     const reason = prompt('Rejection reason:');
     if (!reason) return;
-    await rejectWithdrawal(adminId, wd.id, reason);
-    toast.success('Withdrawal rejected');
-    load();
+    try {
+      await rejectWithdrawal(adminId, wd.id, reason);
+      toast.success('Withdrawal rejected');
+      load();
+    } catch {
+      toast.error('Failed to reject withdrawal');
+    }
   };
 
   const statusColor = { pending: 'text-yellow-400', approved: 'text-green-400', rejected: 'text-red-400', processing: 'text-blue-400' };
@@ -362,7 +393,7 @@ function AdminWithdrawals({ adminId }: { adminId: string }) {
   return (
     <div className="space-y-3">
       <div className="flex gap-2">
-        {['pending', 'approved', 'rejected'].map(s => (
+        {['pending', 'approved', 'rejected', 'processing'].map(s => (
           <button key={s} onClick={() => setFilter(s)} className={`flex-1 py-2 rounded-xl text-xs font-semibold capitalize ${filter === s ? 'bg-hive-gold text-black' : 'bg-white/[0.06] text-white/50'}`}>{s}</button>
         ))}
       </div>
@@ -404,7 +435,14 @@ function AdminWithdrawals({ adminId }: { adminId: string }) {
                       disabled={!txidInputs[wd.id]?.trim()}
                       className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-green-500/15 border border-green-500/20 rounded-xl text-green-400 text-xs font-bold disabled:opacity-40"
                     >
-                      <Check size={12} /> Manual Approve
+                      <Check size={12} /> Manual
+                    </motion.button>
+                    <motion.button
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => handleAutoApprove(wd)}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-blue-500/15 border border-blue-500/20 rounded-xl text-blue-400 text-xs font-bold"
+                    >
+                      <Zap size={12} /> Auto
                     </motion.button>
                     <motion.button whileTap={{ scale: 0.9 }} onClick={() => handleReject(wd)} className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-red-500/15 border border-red-500/20 rounded-xl text-red-400 text-xs font-bold">
                       <X size={12} /> Reject
@@ -503,18 +541,55 @@ function AdminRewardCodes({ adminId }: { adminId: string }) {
 function AdminTasks({ adminId }: { adminId: string }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title: '', reward: '', category: 'main', telegram_link: '', telegram_username: '', icon_url: '', description: '' });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState({ title: '', reward: '', category: 'main', telegram_link: '', telegram_username: '', icon_url: '', description: '', task_type: 'channel' });
 
   const load = () => supabase.from('tasks').select('*').order('sort_order').then(({ data }) => setTasks(data ?? []));
 
   useEffect(() => { load(); }, []);
 
+  const resetForm = () => setForm({ title: '', reward: '', category: 'main', telegram_link: '', telegram_username: '', icon_url: '', description: '', task_type: 'channel' });
+
   const handleCreate = async () => {
     if (!form.title || !form.reward) { toast.error('Title and reward required'); return; }
-    await createTask(adminId, { title: form.title, reward_amount: parseFloat(form.reward), category: form.category as Task['category'], telegram_link: form.telegram_link || null, telegram_username: form.telegram_username || null, icon_url: form.icon_url || null, description: form.description || null, is_active: true, requires_verification: true });
+    await createTask(adminId, { title: form.title, reward_amount: parseFloat(form.reward), category: form.category as Task['category'], telegram_link: form.telegram_link || null, telegram_username: form.telegram_username || null, icon_url: form.icon_url || null, description: form.description || null, is_active: true, requires_verification: true, task_type: form.task_type } as Omit<Task, 'id' | 'created_at' | 'updated_at' | 'sort_order' | 'is_active' | 'requires_verification'> & { is_active: boolean; requires_verification: boolean; sort_order: number });
     toast.success('Task created!');
     setShowForm(false);
-    setForm({ title: '', reward: '', category: 'main', telegram_link: '', telegram_username: '', icon_url: '', description: '' });
+    resetForm();
+    load();
+  };
+
+  const handleEdit = (task: Task) => {
+    setEditingId(task.id);
+    setShowForm(true);
+    setForm({
+      title: task.title,
+      reward: String(task.reward_amount),
+      category: task.category,
+      telegram_link: task.telegram_link ?? '',
+      telegram_username: task.telegram_username ?? '',
+      icon_url: task.icon_url ?? '',
+      description: task.description ?? '',
+      task_type: (task as Task & { task_type?: string }).task_type ?? 'channel',
+    });
+  };
+
+  const handleUpdate = async () => {
+    if (!editingId) return;
+    await updateTask(adminId, editingId, {
+      title: form.title,
+      reward_amount: parseFloat(form.reward),
+      category: form.category as Task['category'],
+      telegram_link: form.telegram_link || null,
+      telegram_username: form.telegram_username || null,
+      icon_url: form.icon_url || null,
+      description: form.description || null,
+      task_type: form.task_type as 'channel' | 'bot' | 'link',
+    });
+    toast.success('Task updated!');
+    setEditingId(null);
+    resetForm();
+    setShowForm(false);
     load();
   };
 
@@ -531,7 +606,7 @@ function AdminTasks({ adminId }: { adminId: string }) {
 
   return (
     <div className="space-y-3">
-      <motion.button whileTap={{ scale: 0.96 }} onClick={() => setShowForm(!showForm)} className="w-full flex items-center justify-center gap-2 py-3 btn-hive rounded-xl font-bold text-sm">
+      <motion.button whileTap={{ scale: 0.96 }} onClick={() => { setShowForm(!showForm); setEditingId(null); resetForm(); }} className="w-full flex items-center justify-center gap-2 py-3 btn-hive rounded-xl font-bold text-sm">
         <Plus size={16} /> {showForm ? 'Cancel' : 'Create Task'}
       </motion.button>
 
@@ -559,7 +634,22 @@ function AdminTasks({ adminId }: { adminId: string }) {
               <option value="community">Community</option>
             </select>
           </div>
-          <motion.button whileTap={{ scale: 0.96 }} onClick={handleCreate} className="w-full py-3 btn-hive rounded-xl font-bold text-sm">Create Task</motion.button>
+          <div>
+            <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">Task Type (Verification)</label>
+            <select value={form.task_type} onChange={e => setForm(f => ({ ...f, task_type: e.target.value }))} className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs focus:outline-none">
+              <option value="channel">Channel (Telegram channel join verification)</option>
+              <option value="bot">Bot (Verify on touch after start)</option>
+              <option value="link">Link (Verify on touch after start)</option>
+            </select>
+          </div>
+          <motion.button whileTap={{ scale: 0.96 }} onClick={() => editingId ? handleUpdate() : handleCreate()} className="w-full py-3 btn-hive rounded-xl font-bold text-sm">
+            {editingId ? <span className="flex items-center justify-center gap-2"><Save size={16} /> Update Task</span> : 'Create Task'}
+          </motion.button>
+          {editingId && (
+            <motion.button whileTap={{ scale: 0.96 }} onClick={() => { setEditingId(null); resetForm(); setShowForm(false); }} className="w-full py-2 bg-white/[0.06] rounded-xl font-bold text-xs text-white/50">
+              Cancel Edit
+            </motion.button>
+          )}
         </GlassCard>
       )}
 
@@ -572,6 +662,9 @@ function AdminTasks({ adminId }: { adminId: string }) {
               <p className="text-hive-gold text-[10px]">+{task.reward_amount}H • {task.category}</p>
             </div>
             <div className="flex gap-1">
+              <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleEdit(task)} className="p-1.5 rounded-lg bg-blue-500/15 text-blue-400">
+                <Edit2 size={12} />
+              </motion.button>
               <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleToggle(task)} className={`p-1.5 rounded-lg ${task.is_active ? 'bg-yellow-500/15 text-yellow-400' : 'bg-green-500/15 text-green-400'}`}>
                 {task.is_active ? <X size={12} /> : <Check size={12} />}
               </motion.button>
@@ -790,7 +883,7 @@ function AdminBroadcast({ adminId }: { adminId: string }) {
   const [imageUrl, setImageUrl] = useState('');
   const [buttonName, setButtonName] = useState('');
   const [buttonUrl, setButtonUrl] = useState('');
-  const [sendToChannel, setSendToChannel] = useState(false);
+  const [sendToChannel, setSendToChannel] = useState(true);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{ sent: number; failed: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -953,6 +1046,9 @@ function AdminAds({ adminId }: { adminId: string }) {
 
   const handleUpdate = async (id: string) => {
     await updateAdProvider(id, {
+      name: form.name || undefined,
+      reward_per_ad: form.reward_per_ad ? parseFloat(form.reward_per_ad) : undefined,
+      daily_limit: form.daily_limit ? parseInt(form.daily_limit) : undefined,
       block_id: form.block_id || undefined,
       network_type: form.network_type || 'interstitial',
       min_watch_seconds: parseInt(form.min_watch_seconds) || 15,
@@ -960,7 +1056,22 @@ function AdminAds({ adminId }: { adminId: string }) {
     });
     toast.success('Provider updated');
     setEditingId(null);
+    setForm({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '' });
     load();
+  };
+
+  const handleEdit = (p: typeof providers[0]) => {
+    setEditingId(p.id);
+    setForm({
+      name: p.name,
+      reward_per_ad: String(p.reward_per_ad),
+      daily_limit: String(p.daily_limit),
+      sort_order: String(p.sort_order),
+      block_id: p.block_id ?? '',
+      network_type: p.network_type ?? 'interstitial',
+      min_watch_seconds: String(p.min_watch_seconds ?? 15),
+      sdk_zone: p.sdk_zone ?? '',
+    });
   };
 
   const handleToggle = async (id: string, active: boolean) => {
@@ -977,7 +1088,7 @@ function AdminAds({ adminId }: { adminId: string }) {
 
   return (
     <div className="space-y-3">
-      <motion.button whileTap={{ scale: 0.96 }} onClick={() => setShowForm(!showForm)} className="w-full flex items-center justify-center gap-2 py-3 btn-hive rounded-xl font-bold text-sm">
+      <motion.button whileTap={{ scale: 0.96 }} onClick={() => { setShowForm(!showForm); setEditingId(null); setForm({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '' }); }} className="w-full flex items-center justify-center gap-2 py-3 btn-hive rounded-xl font-bold text-sm">
         <Plus size={16} /> {showForm ? 'Cancel' : 'Add Ad Provider'}
       </motion.button>
 
@@ -1005,7 +1116,14 @@ function AdminAds({ adminId }: { adminId: string }) {
               <option value="banner">Banner</option>
             </select>
           </div>
-          <motion.button whileTap={{ scale: 0.96 }} onClick={handleCreate} className="w-full py-3 btn-hive rounded-xl font-bold text-sm">Create Provider</motion.button>
+          <motion.button whileTap={{ scale: 0.96 }} onClick={() => editingId ? handleUpdate(editingId) : handleCreate} className="w-full py-3 btn-hive rounded-xl font-bold text-sm">
+            {editingId ? <span className="flex items-center justify-center gap-2"><Save size={16} /> Update Provider</span> : 'Create Provider'}
+          </motion.button>
+          {editingId && (
+            <motion.button whileTap={{ scale: 0.96 }} onClick={() => { setEditingId(null); setForm({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '' }); }} className="w-full py-2 bg-white/[0.06] rounded-xl font-bold text-xs text-white/50">
+              Cancel Edit
+            </motion.button>
+          )}
         </GlassCard>
       )}
 
@@ -1018,6 +1136,9 @@ function AdminAds({ adminId }: { adminId: string }) {
               <p className="text-white/40 text-[10px]">{p.reward_per_ad} 🍯/ad • {p.daily_limit}/day {p.block_id && <span className="text-blue-400">• {p.block_id}</span>}</p>
               {p.min_watch_seconds && <p className="text-white/30 text-[9px]">Min watch: {p.min_watch_seconds}s • {p.network_type}</p>}
             </div>
+            <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleEdit(p)} className="px-2 py-1 rounded-lg bg-blue-500/15 text-blue-400 text-[10px] font-bold">
+              <Edit2 size={12} />
+            </motion.button>
             <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleToggle(p.id, p.is_active)} className={`px-2 py-1 rounded-lg text-[10px] font-bold ${p.is_active ? 'bg-green-500/15 text-green-400' : 'bg-white/[0.06] text-white/40'}`}>
               {p.is_active ? 'Active' : 'Off'}
             </motion.button>
@@ -1147,16 +1268,23 @@ function AdminSettings({ adminId }: { adminId: string }) {
   };
 
   const knownSettings = [
-    { key: 'hive_to_usdt', label: 'HIVE → USDT Rate', placeholder: 'e.g. 0.001' },
-    { key: 'min_withdrawal_usdt', label: 'Min Withdrawal (USDT)', placeholder: 'e.g. 0.08' },
-    { key: 'referral_reward', label: 'Referral Reward (Hive)', placeholder: 'e.g. 25' },
-    { key: 'daily_bonus', label: 'Daily Bonus (Hive)', placeholder: 'e.g. 10' },
-    { key: 'required_daily_ads', label: 'Required Daily Ads for Withdraw', placeholder: 'e.g. 20' },
-    { key: 'required_referrals', label: 'Required Referrals for Withdraw', placeholder: 'e.g. 2' },
-    { key: 'required_main_tasks', label: 'Required Main Tasks for Withdraw', placeholder: 'e.g. 2' },
-    { key: 'withdraw_ad_count', label: 'Ads Before Withdrawal', placeholder: 'e.g. 2' },
-    { key: 'visit_site_reward', label: 'Visit Site Reward (Hive)', placeholder: 'e.g. 5' },
-    { key: 'visit_site_min_seconds', label: 'Visit Site Min Seconds', placeholder: 'e.g. 15' },
+    { key: 'hive_to_usdt_rate', label: 'HIVE → USDT Rate', placeholder: 'e.g. 0.0001' },
+    { key: 'min_withdraw_usdt', label: 'Min Withdrawal (USDT)', placeholder: 'e.g. 0.08' },
+    { key: 'withdraw_fee_fixed', label: 'Withdraw Fee Fixed (USDT)', placeholder: 'e.g. 0.01' },
+    { key: 'withdraw_fee_percent', label: 'Withdraw Fee Percent', placeholder: 'e.g. 5' },
+    { key: 'referral_join_reward', label: 'Referral Join Reward (Hive)', placeholder: 'e.g. 25' },
+    { key: 'referral_first_ads_reward', label: 'Referral First Ads Reward (Hive)', placeholder: 'e.g. 50' },
+    { key: 'referral_second_day_reward', label: 'Referral Second Day Reward (Hive)', placeholder: 'e.g. 75' },
+    { key: 'daily_bonus_amount', label: 'Daily Bonus (Hive)', placeholder: 'e.g. 10' },
+    { key: 'withdraw_req_daily_ads', label: 'Required Daily Ads for Withdraw', placeholder: 'e.g. 20' },
+    { key: 'withdraw_req_refers', label: 'Required Referrals for Withdraw', placeholder: 'e.g. 2' },
+    { key: 'withdraw_req_main_tasks', label: 'Required Main Tasks for Withdraw', placeholder: 'e.g. true' },
+    { key: 'max_withdrawal', label: 'Max Withdrawal (USDT)', placeholder: 'e.g. 0.5' },
+    { key: 'auto_withdraw_enabled', label: 'Auto Withdraw Enabled', placeholder: 'true/false' },
+    { key: 'auto_withdraw_wallet', label: 'Auto Withdraw Trust Wallet', placeholder: '0x...' },
+    { key: 'daily_reminder_enabled', label: 'Daily Reminders Enabled', placeholder: 'true/false' },
+    { key: 'daily_reminder_interval_hours', label: 'Reminder Interval (hours)', placeholder: 'e.g. 4' },
+    { key: 'broadcast_to_channel', label: 'Broadcast to Channel', placeholder: 'true/false' },
   ];
 
   return (
@@ -1197,10 +1325,11 @@ function AdminSettings({ adminId }: { adminId: string }) {
             <div className="flex-1">
               <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">{label}</label>
               <input
+                key={`setting-${key}-${settings[key] ?? ''}`}
                 type="text"
                 placeholder={placeholder}
                 defaultValue={settings[key] ?? ''}
-                onBlur={e => { if (e.target.value !== (settings[key] ?? '')) { updateAppSetting(key, e.target.value).then(() => { toast.success(`${label} updated`); load(); }); } }}
+                onBlur={e => { if (e.target.value !== (settings[key] ?? '')) { updateAppSetting(key, e.target.value).then(() => { toast.success(`${label} updated`); load(); }).catch(() => toast.error('Failed to update setting')); } }}
                 className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none focus:border-hive-gold/30"
               />
             </div>

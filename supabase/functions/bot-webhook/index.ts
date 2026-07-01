@@ -5,8 +5,7 @@ const MINI_APP_URL = Deno.env.get("MINI_APP_URL") ?? "https://t.me/Hiveearnbot/p
 const COMMUNITY_CHANNEL = Deno.env.get("COMMUNITY_CHANNEL") ?? "hiveearn";
 const PAYMENT_CHANNEL = Deno.env.get("PAYMENT_CHANNEL") ?? "hiveearnpayment";
 const ADMIN_CHAT_ID = Deno.env.get("ADMIN_CHAT_ID") ?? "5419054691";
-// New banner: either a Telegram file_id or a public URL to the image
-const BANNER_PHOTO = Deno.env.get("BANNER_PHOTO") ?? "https://t.me/Hiveearnbot/play"; // set to file_id or URL of new banner
+const BANNER_PHOTO = Deno.env.get("BANNER_PHOTO") ?? "https://t.me/Hiveearnbot/play";
 const APP_URL = Deno.env.get("APP_URL") ?? "";
 
 const corsHeaders = {
@@ -15,7 +14,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-// Inline keyboard with 3 buttons: Open App, Community, Payment
+// Inline keyboard: Open App + Community + Payment buttons
 function getMainKeyboard() {
   return {
     inline_keyboard: [
@@ -24,6 +23,15 @@ function getMainKeyboard() {
         { text: "👥 Community", url: `https://t.me/${COMMUNITY_CHANNEL}` },
         { text: "💳 Payments", url: `https://t.me/${PAYMENT_CHANNEL}` },
       ],
+    ],
+  };
+}
+
+// Keyboard with Open Hive Earn button only (for reminders)
+function getReminderKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }],
     ],
   };
 }
@@ -41,10 +49,7 @@ async function tgSendMessage(chatId: string | number, text: string, includeAppBu
 }
 
 async function tgSendPhoto(chatId: string | number, caption: string, includeAppButton = true, customKeyboard?: unknown) {
-  // Use banner photo: if APP_URL is set, use the image from public folder, else use BANNER_PHOTO (file_id or URL)
-  const photoSource = APP_URL
-    ? `${APP_URL}/IMG-20260624-WA0001.jpg`
-    : BANNER_PHOTO;
+  const photoSource = APP_URL ? `${APP_URL}/IMG-20260624-WA0001.jpg` : BANNER_PHOTO;
 
   const payload: Record<string, unknown> = {
     chat_id: chatId,
@@ -116,6 +121,15 @@ async function checkChannelMembership(userId: number, channel: string): Promise<
   }
 }
 
+// Daily reminder messages — varied so users don't get the same message every time
+const reminderMessages = [
+  "🐝 <b>Don't forget to earn your Hive today!</b>\n\n📺 Watch ads\n🎁 Claim daily bonus\n✅ Complete tasks\n\nYour Hive balance is waiting! Tap below to open the app.",
+  "🍯 <b>Your Hive tokens are waiting!</b>\n\nCome back and earn more Hive by:\n📺 Watching ads\n👥 Referring friends\n🎁 Daily bonus\n\nKeep your streak alive!",
+  "🚀 <b>Ready to earn more?</b>\n\nNew ads and tasks are available!\nDon't miss out on your daily bonus.\n\nTap to open Hive Earn now!",
+  "💰 <b>Earn while you sleep? Almost!</b>\n\nJust a few taps a day keeps the Hive growing.\nWatch ads, do tasks, claim bonus.\n\nOpen the app below!",
+  "🐝 <b>Hive Earn Reminder</b>\n\nYour friends are earning right now!\nDon't miss today's rewards.\n\n📺 Watch ads\n🎁 Daily bonus\n✅ Tasks\n\nTap below to start earning!",
+];
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -146,6 +160,7 @@ Deno.serve(async (req: Request) => {
         `Minimum: $0.08 USDT | Network: BSC (BEP20)\n\n` +
         `Tap the button below to open the mini app and start earning! 🚀`;
 
+      // Send welcome with banner photo + community/payment buttons
       await tgSendPhoto(chatId, welcomeText, true);
 
       // Notify admin
@@ -169,7 +184,7 @@ Deno.serve(async (req: Request) => {
         `/help — Show this help message\n\n` +
         `<b>Earn Hive by:</b>\n` +
         `📺 Watching ads\n✅ Completing tasks\n🎁 Daily bonus\n⚡ Reward codes\n👥 Referring friends\n\n` +
-        `<b>Support:</b> @hiveearn\n` +
+        `<b>Support:</b> @hiveearnsupport\n` +
         `<b>Community:</b> @${COMMUNITY_CHANNEL}\n` +
         `<b>Payments:</b> @${PAYMENT_CHANNEL}`,
         true
@@ -177,7 +192,7 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Handle broadcast with photo (called from admin panel via edge function invoke)
+    // Handle broadcast with photo (called from admin panel)
     if (update.type === "broadcast_photo") {
       const { chat_ids, caption, photo_url, button_name, button_url, send_to_channel } = update;
       let sent = 0, failed = 0;
@@ -186,6 +201,7 @@ Deno.serve(async (req: Request) => {
         ? { inline_keyboard: [[{ text: button_name, url: button_url }], [{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }]] }
         : getMainKeyboard();
 
+      // Send to ALL users including suspended (no filtering)
       for (let i = 0; i < (chat_ids ?? []).length; i += 25) {
         const batch = chat_ids.slice(i, i + 25);
         await Promise.all(batch.map(async (cid: number) => {
@@ -209,7 +225,7 @@ Deno.serve(async (req: Request) => {
         if (i + 25 < (chat_ids ?? []).length) await new Promise(r => setTimeout(r, 500));
       }
 
-      // Send to community channel if requested
+      // Also post to community channel if requested
       if (send_to_channel) {
         try {
           if (photo_url) {
@@ -221,6 +237,35 @@ Deno.serve(async (req: Request) => {
       }
 
       return new Response(JSON.stringify({ ok: true, sent, failed }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Handle daily reminder (called from edge function or cron)
+    if (update.type === "daily_reminder") {
+      const { chat_id } = update;
+      if (!chat_id) {
+        return new Response(JSON.stringify({ error: "chat_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      // Pick a random message
+      const msg = reminderMessages[Math.floor(Math.random() * reminderMessages.length)];
+      // Send with banner photo + Open Hive Earn button
+      await tgSendPhoto(chat_id, msg, true, getReminderKeyboard());
+
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Handle broadcast to community channel only (for boicast messages)
+    if (update.type === "broadcast_to_channel") {
+      const { caption, photo_url, button_name, button_url } = update;
+      try {
+        if (photo_url) {
+          await tgSendPhotoToChannel(COMMUNITY_CHANNEL, caption, photo_url, button_name, button_url);
+        } else {
+          await tgSendMessageToChannel(COMMUNITY_CHANNEL, caption, button_name, button_url);
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      } catch {
+        return new Response(JSON.stringify({ ok: false, error: "Failed to post to channel" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
     }
 
     // Handle callback queries

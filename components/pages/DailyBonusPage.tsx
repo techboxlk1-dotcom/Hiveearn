@@ -40,7 +40,11 @@ export default function DailyBonusPage() {
     if (!user || claiming || !canClaim) return;
     setClaiming(true);
     try {
-      await showRandomAd();
+      const adResult = await showRandomAd();
+      if (!adResult.success) {
+        toast.error('Ad not played. No reward without watching an ad.');
+        return;
+      }
       const result = await claimDailyBonus(user.id);
       if (result.success) {
         setClaimed(true);

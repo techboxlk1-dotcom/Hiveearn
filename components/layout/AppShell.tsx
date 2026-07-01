@@ -24,8 +24,8 @@ export default function AppShell({ children, hideNav = false }: AppShellProps) {
 
   if (isLoading) return <SplashScreen />;
 
-  // Maintenance mode - only admin can access
-  if (maintenanceMode && !user?.is_admin) {
+  // Maintenance mode - only admin/manager can access
+  if (maintenanceMode && !user?.is_admin && !user?.is_manager) {
     return (
       <div className="min-h-dvh bg-[#0A0A0A] flex flex-col items-center justify-center px-6 text-center">
         <motion.div

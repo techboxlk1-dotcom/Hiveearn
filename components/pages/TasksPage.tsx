@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle, Clock, ExternalLink, ArrowLeft, MessageCircle } from 'lucide-react';
+import { CheckCircle, Clock, ExternalLink, ArrowLeft, MessageCircle, Plus, Bot, Link as LinkIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import { getTasks, getUserTaskCompletions, startTask, verifyTask } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 import type { Task } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { useRewardPopup } from '@/components/ui/RewardPopup';
@@ -18,7 +19,7 @@ interface TaskWithStatus extends Task {
   completion_status?: 'pending' | 'verified' | 'rejected';
 }
 
-// Task icon component that handles image loading errors
+// Task icon component — handles imgbb URLs and direct image URLs
 function TaskIcon({ iconUrl, category }: { iconUrl: string | null; category: string }) {
   const [imageError, setImageError] = useState(false);
 
@@ -28,11 +29,21 @@ function TaskIcon({ iconUrl, category }: { iconUrl: string | null; category: str
     return <span className="text-xl">{fallbackEmoji}</span>;
   }
 
-  // Convert imgbb page URLs to direct image URLs if needed
-  let imageUrl = iconUrl;
-  if (iconUrl.includes('ibb.co') && !iconUrl.includes('i.ibb.co')) {
-    // Convert https://ibb.co/XXXXX to https://i.ibb.co/XXXXX/image.png
-    imageUrl = iconUrl.replace('ibb.co', 'i.ibb.co') + '/image.png';
+  // Handle imgbb URLs:
+  // Direct image URLs (i.ibb.co/xxx/image.png) work as-is
+  // Page URLs (ibb.co/xxx) need conversion, but we can't reliably guess the extension
+  // So we try the URL as-is first, and if it's a page URL, try common patterns
+  let imageUrl = iconUrl.trim();
+
+  // If it's an ibb.co page URL (not direct image), try converting
+  if (imageUrl.includes('ibb.co') && !imageUrl.includes('i.ibb.co')) {
+    // Try direct image URL format — imgbb direct URLs are i.ibb.co/<code>/<filename>.<ext>
+    // Since we don't know the extension, try .png and .jpg via onError fallback
+    imageUrl = imageUrl.replace('ibb.co', 'i.ibb.co');
+    // If no file extension, try appending common ones
+    if (!imageUrl.match(/\.(png|jpg|jpeg|gif|webp)$/i)) {
+      imageUrl = imageUrl + '.png';
+    }
   }
 
   return (
@@ -41,7 +52,19 @@ function TaskIcon({ iconUrl, category }: { iconUrl: string | null; category: str
       src={imageUrl}
       alt="Task icon"
       className="w-full h-full object-cover"
-      onError={() => setImageError(true)}
+      onError={() => {
+        // Try .jpg if .png fails (for imgbb URLs)
+        if (imageUrl.endsWith('.png')) {
+          imageUrl = imageUrl.replace('.png', '.jpg');
+          // Force re-render by changing key — but since we can't, use a different approach
+          setImageError(false);
+          // Use direct DOM manipulation as fallback
+          const img = document.querySelector(`img[src="${imageUrl.replace('.jpg', '.png')}"]`) as HTMLImageElement | null;
+          if (img) img.src = imageUrl;
+          return;
+        }
+        setImageError(true);
+      }}
     />
   );
 }
@@ -53,12 +76,17 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<TaskWithStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
     setLoading(true);
     Promise.all([getTasks(), getUserTaskCompletions(user.id)]).then(([allTasks, completions]) => {
-      const withStatus = allTasks.map(t => ({ ...t, completion_status: completions[t.id] as TaskWithStatus['completion_status'] }));
+      const withStatus = allTasks.map(t => ({
+        ...t,
+        completion_status: completions[t.id] as TaskWithStatus['completion_status'],
+        task_type: (t as Task & { task_type?: string }).task_type ?? 'channel',
+      }));
       setTasks(withStatus);
       setLoading(false);
     });
@@ -66,7 +94,7 @@ export default function TasksPage() {
 
   const filteredTasks = tasks.filter(t => t.category === activeTab);
 
-  const handleJoin = async (task: TaskWithStatus) => {
+  const handleJoin = useCallback(async (task: TaskWithStatus) => {
     if (!user || actionLoading) return;
     if (task.telegram_link) window.open(task.telegram_link, '_blank');
     if (!task.completion_status) {
@@ -75,29 +103,73 @@ export default function TasksPage() {
       setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completion_status: 'pending' } : t));
       setActionLoading(null);
     }
-  };
+  }, [user, actionLoading]);
 
-  const handleVerify = async (task: TaskWithStatus) => {
+  // For channel tasks: verify via Telegram channel membership check
+  // For bot/link tasks: verify on touch (trust verify — user just taps verify after starting)
+  const handleVerify = useCallback(async (task: TaskWithStatus) => {
     if (!user || actionLoading) return;
     setActionLoading(task.id);
-    const result = await verifyTask(user.id, task.id);
-    if (result.success) {
-      toast.success(result.message, { icon: '✅' });
-      showReward(result.hive, 'Task Completed!', task.title, '✅');
-      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completion_status: 'verified' } : t));
-      await refreshUser();
-    } else {
-      toast.error(result.message);
+    setVerifying(task.id);
+
+    try {
+      // For channel tasks, check actual Telegram channel membership
+      if (task.task_type === 'channel' && task.telegram_link) {
+        // Extract channel username from link
+        const channelMatch = task.telegram_link.match(/t\.me\/(?:joinchat\/)?(@?[\w-]+)/);
+        if (channelMatch) {
+          const channel = channelMatch[1].replace('@', '');
+          // Call the check-membership edge function
+          const { data, error } = await supabase.functions.invoke('check-membership', {
+            body: { user_id: user.telegram_id, channel },
+          });
+          if (error || !data?.is_member) {
+            toast.error('You haven\'t joined the channel yet. Please join first, then verify.');
+            setActionLoading(null);
+            setVerifying(null);
+            return;
+          }
+        }
+      }
+
+      // For bot/link tasks: trust verify — just verify on touch
+      // For channel tasks: if membership confirmed above, proceed
+      const result = await verifyTask(user.id, task.id);
+      if (result.success) {
+        toast.success(result.message, { icon: '✅' });
+        showReward(result.hive, 'Task Completed!', task.title, '✅');
+        setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completion_status: 'verified' } : t));
+        await refreshUser();
+      } else {
+        toast.error(result.message);
+      }
+    } catch {
+      toast.error('Verification failed. Please try again.');
+    } finally {
+      setActionLoading(null);
+      setVerifying(null);
     }
-    setActionLoading(null);
-  };
+  }, [user, actionLoading, showReward, refreshUser]);
 
   const tabLabels: Record<TabType, string> = { main: 'Main', partner: 'Partner', community: 'Community' };
 
-  // Support button click handler
+  // Support button click handler — opens support chat
   const handleSupportClick = () => {
     const supportText = encodeURIComponent("Hi, I need help with tasks in Hive Earn Mini App.");
-    window.open(`https://t.me/hiveearnsupport?text=${supportText}`, '_blank');
+    window.open('https://t.me/hiveearnsupport', '_blank');
+  };
+
+  // Get task type icon
+  const getTaskTypeIcon = (taskType?: string) => {
+    if (taskType === 'bot') return <Bot size={10} />;
+    if (taskType === 'link') return <LinkIcon size={10} />;
+    return null;
+  };
+
+  const getTaskTypeLabel = (taskType?: string) => {
+    if (taskType === 'bot') return 'Bot Task';
+    if (taskType === 'link') return 'Link Task';
+    return 'Channel Task';
   };
 
   return (
@@ -132,18 +204,32 @@ export default function TasksPage() {
         ))}
       </div>
 
-      {/* Support buttons for partner/community tabs */}
+      {/* Add task buttons for partner/community tabs */}
       {(activeTab === 'partner' || activeTab === 'community') && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-4">
           <GlassCard className="p-4" animate={false}>
-            <p className="text-white/40 text-xs mb-3">Need help or want to add your own {activeTab} task?</p>
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={handleSupportClick}
-              className="w-full py-3 rounded-xl bg-blue-500/15 border border-blue-500/20 text-blue-400 text-sm font-bold flex items-center justify-center gap-2"
-            >
-              <MessageCircle size={16} /> Contact Support
-            </motion.button>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="text-white font-semibold text-sm">Add {activeTab === 'partner' ? 'Partner' : 'Community'} Task</p>
+                <p className="text-white/40 text-xs">Contact support to add your task</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={handleSupportClick}
+                className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-blue-500/15 border border-blue-500/20 text-blue-400 text-xs font-bold"
+              >
+                <Plus size={14} /> Add {activeTab === 'partner' ? 'Partner' : 'Community'} Task
+              </motion.button>
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={handleSupportClick}
+                className="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white/[0.06] border border-white/[0.08] text-white/60 text-xs font-bold"
+              >
+                <MessageCircle size={14} /> Support Chat
+              </motion.button>
+            </div>
           </GlassCard>
         </motion.div>
       )}
@@ -163,7 +249,7 @@ export default function TasksPage() {
               onClick={handleSupportClick}
               className="mt-4 px-4 py-2 rounded-xl bg-blue-500/15 border border-blue-500/20 text-blue-400 text-xs font-bold"
             >
-              Add {activeTab} Task
+              <Plus size={12} className="inline mr-1" /> Add {activeTab} Task
             </motion.button>
           )}
         </div>
@@ -204,6 +290,14 @@ export default function TasksPage() {
                           <p className="text-blue-400 text-xs mt-0.5">@{task.telegram_username}</p>
                         )}
 
+                        {/* Task type badge */}
+                        {task.task_type && task.task_type !== 'channel' && (
+                          <div className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 bg-blue-500/10 rounded-full">
+                            {getTaskTypeIcon(task.task_type)}
+                            <span className="text-blue-400 text-[10px] font-semibold">{getTaskTypeLabel(task.task_type)}</span>
+                          </div>
+                        )}
+
                         {/* Action buttons */}
                         <div className="flex gap-2 mt-3">
                           {status === 'verified' ? (
@@ -240,12 +334,12 @@ export default function TasksPage() {
                                   whileTap={{ scale: 0.95 }}
                                   className="flex items-center gap-1.5 px-3 py-1.5 btn-hive rounded-xl text-xs font-bold disabled:opacity-50"
                                 >
-                                  <ExternalLink size={12} /> Join
+                                  <ExternalLink size={12} /> {task.task_type === 'channel' ? 'Join' : 'Start'}
                                 </motion.button>
                               )}
                               <div className="flex items-center gap-1 text-white/30 text-[10px]">
                                 <Clock size={10} />
-                                <span>Join then verify</span>
+                                <span>{task.task_type === 'channel' ? 'Join then verify' : 'Start then verify'}</span>
                               </div>
                             </>
                           )}

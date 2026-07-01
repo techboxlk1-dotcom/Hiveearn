@@ -2,6 +2,7 @@ import './globals.css';
 import type { Metadata } from 'next';
 import Script from 'next/script';
 import { UserProvider } from '@/contexts/UserContext';
+import { LanguageProvider } from '@/contexts/LanguageContext';
 import { RewardPopupProvider } from '@/components/ui/RewardPopup';
 import { Toaster } from 'sonner';
 
@@ -33,21 +34,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Gigapub SDK */}
         <Script src="https://ad.gigapub.tech/script?id=7069" strategy="afterInteractive" />
         <UserProvider>
-          <RewardPopupProvider>
-            {children}
-            <Toaster
-              theme="dark"
-              position="top-center"
-              toastOptions={{
-                style: {
-                  background: 'rgba(20, 20, 20, 0.95)',
-                  border: '1px solid rgba(245, 197, 24, 0.2)',
-                  color: '#fff',
-                  backdropFilter: 'blur(20px)',
-                },
-              }}
-            />
-          </RewardPopupProvider>
+          <LanguageProvider telegramLangCode={typeof window !== 'undefined' ? window.Telegram?.WebApp?.initDataUnsafe?.user?.language_code : undefined}>
+            <RewardPopupProvider>
+              {children}
+              <Toaster
+                theme="dark"
+                position="top-center"
+                toastOptions={{
+                  style: {
+                    background: 'rgba(20, 20, 20, 0.95)',
+                    border: '1px solid rgba(245, 197, 24, 0.2)',
+                    color: '#fff',
+                    backdropFilter: 'blur(20px)',
+                  },
+                }}
+              />
+            </RewardPopupProvider>
+          </LanguageProvider>
         </UserProvider>
       </body>
     </html>

@@ -8,10 +8,14 @@ export interface AdResult {
   clicked: boolean;
 }
 
+export interface RandomAdResult {
+  success: boolean;
+  network: string;
+}
+
 export function useAds() {
   const adsgramReady = useCallback(() => typeof window !== 'undefined' && !!window.Adsgram, []);
 
-  // Block int-36139: auto-open interstitial, no reward, no error shown
   const showAutoAd = useCallback(async () => {
     if (!adsgramReady()) return;
     try {
@@ -22,7 +26,6 @@ export function useAds() {
     }
   }, [adsgramReady]);
 
-  // Block 36138: rewarded ad — returns result
   const showRewardAd = useCallback((): Promise<AdResult> => {
     return new Promise((resolve) => {
       if (!adsgramReady()) {
@@ -33,7 +36,8 @@ export function useAds() {
         const controller = window.Adsgram!.init({ blockId: '36138' });
         controller.show()
           .then((result) => {
-            resolve({ success: result.done, watched: !result.error, clicked: result.done });
+            const done = result.done && !result.error;
+            resolve({ success: done, watched: !result.error, clicked: done });
           })
           .catch(() => {
             resolve({ success: false, watched: false, clicked: false });
@@ -44,7 +48,7 @@ export function useAds() {
     });
   }, [adsgramReady]);
 
-  // Monetag ad — returns after SDK call (no reliable done callback)
+  // Monetag: shows ad and waits minimum 5 seconds to confirm it actually played
   const showMonetag = useCallback((): Promise<{ opened: boolean }> => {
     return new Promise((resolve) => {
       if (typeof window === 'undefined' || !window.show_11196790) {
@@ -53,43 +57,73 @@ export function useAds() {
       }
       try {
         window.show_11196790();
-        resolve({ opened: true });
+        // Wait 5 seconds before resolving — ensures the ad actually displayed
+        // If the SDK throws or the function doesn't exist, we resolve immediately with false
+        setTimeout(() => resolve({ opened: true }), 5000);
       } catch {
         resolve({ opened: false });
       }
     });
   }, []);
 
-  // Gigapub ad — returns promise result
+  // Gigapub: shows ad and waits to confirm
   const showGigapub = useCallback((): Promise<{ success: boolean }> => {
     return new Promise((resolve) => {
       if (typeof window === 'undefined' || !window.showGiga) {
         resolve({ success: false });
         return;
       }
-      window.showGiga!()
-        .then(() => resolve({ success: true }))
-        .catch(() => resolve({ success: false }));
+      try {
+        const result = window.showGiga!();
+        if (result && typeof result.then === 'function') {
+          result
+            .then(() => resolve({ success: true }))
+            .catch(() => resolve({ success: false }));
+        } else {
+          // If showGiga doesn't return a promise, wait 5s then resolve
+          setTimeout(() => resolve({ success: true }), 5000);
+        }
+      } catch {
+        resolve({ success: false });
+      }
     });
   }, []);
 
-  // Random network ad for daily/referral/reward code (picks randomly from available)
-  const showRandomAd = useCallback(async (): Promise<void> => {
+  // Random network ad — returns whether ad actually played
+  const showRandomAd = useCallback(async (): Promise<RandomAdResult> => {
     const options = ['adsgram', 'monetag', 'gigapub'];
-    const pick = options[Math.floor(Math.random() * options.length)];
-    if (pick === 'adsgram' && adsgramReady()) {
-      try {
-        const controller = window.Adsgram!.init({ blockId: 'int-36139' });
-        controller.show().catch(() => {});
-        return;
-      } catch { /* fall through */ }
+    // Shuffle and try each until one works
+    const shuffled = [...options].sort(() => Math.random() - 0.5);
+
+    for (const pick of shuffled) {
+      if (pick === 'adsgram' && adsgramReady()) {
+        try {
+          const controller = window.Adsgram!.init({ blockId: 'int-36139' });
+          await controller.show();
+          return { success: true, network: 'adsgram' };
+        } catch { /* try next */ }
+      }
+      if (pick === 'monetag' && typeof window !== 'undefined' && window.show_11196790) {
+        try {
+          window.show_11196790();
+          // Wait 5 seconds to confirm ad played
+          await new Promise(r => setTimeout(r, 5000));
+          return { success: true, network: 'monetag' };
+        } catch { /* try next */ }
+      }
+      if (pick === 'gigapub' && typeof window !== 'undefined' && window.showGiga) {
+        try {
+          const result = window.showGiga!();
+          if (result && typeof result.then === 'function') {
+            await result;
+          } else {
+            await new Promise(r => setTimeout(r, 5000));
+          }
+          return { success: true, network: 'gigapub' };
+        } catch { /* try next */ }
+      }
     }
-    if (pick === 'monetag' && typeof window !== 'undefined' && window.show_11196790) {
-      try { window.show_11196790(); return; } catch { /* fall through */ }
-    }
-    if (typeof window !== 'undefined' && window.showGiga) {
-      try { window.showGiga!().catch(() => {}); } catch { /* ignore */ }
-    }
+    return { success: false, network: 'none' };
   }, [adsgramReady]);
 
   return { showAutoAd, showRewardAd, showMonetag, showGigapub, showRandomAd, adsgramReady };

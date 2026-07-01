@@ -23,6 +23,7 @@ interface UserContextType {
   unreadCount: number;
   isLoading: boolean;
   isAdmin: boolean;
+  isManager: boolean;
   refreshUser: () => Promise<void>;
   refreshNotifications: () => Promise<void>;
   markAllRead: () => Promise<void>;
@@ -140,9 +141,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   // Admin if DB flag OR matches hardcoded admin Telegram ID
   const isAdmin = (user?.is_admin ?? false) || (telegramUser?.id === ADMIN_TELEGRAM_ID);
+  const isManager = user?.is_manager ?? false;
 
   return (
-    <UserContext.Provider value={{ user, telegramUser, notifications, unreadCount, isLoading, isAdmin, refreshUser, refreshNotifications, markAllRead }}>
+    <UserContext.Provider value={{ user, telegramUser, notifications, unreadCount, isLoading, isAdmin, isManager, refreshUser, refreshNotifications, markAllRead }}>
       {children}
     </UserContext.Provider>
   );

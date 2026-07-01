@@ -19,8 +19,8 @@ interface ProviderWithCount extends AdProvider {
   todayCount: number;
 }
 
-// "Ad Not Clicked" popup component
-function AdNotClickedModal({ onWatchAgain, onLater }: { onWatchAgain: () => void; onLater: () => void }) {
+// Ad error popup — shown when ad didn't play
+function AdErrorModal({ message, onRetry, onLater }: { message: string; onRetry: () => void; onLater: () => void }) {
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -40,36 +40,23 @@ function AdNotClickedModal({ onWatchAgain, onLater }: { onWatchAgain: () => void
       >
         <div className="p-5">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-14 h-14 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center flex-shrink-0">
-              <MousePointer size={28} className="text-yellow-400" />
+            <div className="w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center flex-shrink-0">
+              <AlertCircle size={28} className="text-red-400" />
             </div>
             <div>
-              <p className="text-red-400 font-black text-lg leading-tight">Ad Not Clicked!</p>
-              <p className="text-white/40 text-xs uppercase tracking-widest">Click Required to Earn</p>
+              <p className="text-red-400 font-black text-lg leading-tight">Ad Not Played!</p>
+              <p className="text-white/40 text-xs uppercase tracking-widest">No Reward Without Ad</p>
             </div>
           </div>
 
           <div className="p-3 mb-4 rounded-xl border border-red-500/20 bg-red-500/5 flex items-start gap-2">
             <AlertCircle size={14} className="text-red-400 mt-0.5 flex-shrink-0" />
-            <p className="text-red-400/80 text-xs">Tap the advertiser&apos;s button to earn<br /><span className="text-white/40">Full ad watch + CTA click = reward. Skipping = no payout.</span></p>
-          </div>
-
-          <div className="space-y-2.5 mb-5">
-            {[
-              { icon: '👁', text: 'Watch the full ad' },
-              { icon: '⚡', text: "Tap advertiser's button" },
-              { icon: '🍯', text: 'Come back & claim reward' },
-            ].map(({ icon, text }) => (
-              <div key={text} className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-white/[0.05] flex items-center justify-center text-base">{icon}</div>
-                <span className="text-white/70 text-sm">{text}</span>
-              </div>
-            ))}
+            <p className="text-red-400/80 text-xs">{message}<br /><span className="text-white/40">You must watch the ad to earn a reward.</span></p>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <motion.button whileTap={{ scale: 0.96 }} onClick={onWatchAgain} className="py-3 rounded-2xl font-bold text-sm" style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff' }}>
-              <span className="flex items-center justify-center gap-2"><PlayCircle size={16} /> Watch Again</span>
+            <motion.button whileTap={{ scale: 0.96 }} onClick={onRetry} className="py-3 rounded-2xl font-bold text-sm" style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff' }}>
+              <span className="flex items-center justify-center gap-2"><PlayCircle size={16} /> Try Again</span>
             </motion.button>
             <motion.button whileTap={{ scale: 0.96 }} onClick={onLater} className="py-3 rounded-2xl font-bold text-sm bg-white/[0.06] text-white/60">
               Later
@@ -81,13 +68,14 @@ function AdNotClickedModal({ onWatchAgain, onLater }: { onWatchAgain: () => void
   );
 }
 
-// Ad watching progress modal with countdown
+// Ad watching progress modal with countdown — ad must stay open
 function AdWatchingModal({ seconds, providerName, onComplete, onCancel }: { seconds: number; providerName: string; onComplete: () => void; onCancel: () => void }) {
   const [remaining, setRemaining] = useState(seconds);
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
     if (remaining <= 0) {
-      onComplete();
+      if (!cancelledRef.current) onComplete();
       return;
     }
     const timer = setTimeout(() => setRemaining(r => r - 1), 1000);
@@ -95,6 +83,11 @@ function AdWatchingModal({ seconds, providerName, onComplete, onCancel }: { seco
   }, [remaining, onComplete]);
 
   const progress = ((seconds - remaining) / seconds) * 100;
+
+  const handleCancel = () => {
+    cancelledRef.current = true;
+    onCancel();
+  };
 
   return (
     <motion.div
@@ -118,7 +111,6 @@ function AdWatchingModal({ seconds, providerName, onComplete, onCancel }: { seco
         <h3 className="text-white font-black text-lg mb-1">{providerName}</h3>
         <p className="text-white/40 text-xs mb-6">Please wait while ad plays...</p>
 
-        {/* Circular progress */}
         <div className="relative w-32 h-32 mx-auto mb-6">
           <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
             <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="8" />
@@ -133,14 +125,22 @@ function AdWatchingModal({ seconds, providerName, onComplete, onCancel }: { seco
           </div>
         </div>
 
-        <p className="text-white/30 text-xs">Do not close this window</p>
+        <p className="text-white/30 text-xs mb-4">Do not close this window</p>
+
+        <motion.button
+          whileTap={{ scale: 0.95 }}
+          onClick={handleCancel}
+          className="px-4 py-2 rounded-xl bg-red-500/15 border border-red-500/20 text-red-400 text-xs font-bold"
+        >
+          Cancel
+        </motion.button>
       </motion.div>
     </motion.div>
   );
 }
 
 // Visit website countdown modal
-function VisitCountdownModal({ seconds, onComplete, onCancel }: { seconds: number; onComplete: () => void; onCancel: () => void }) {
+function VisitCountdownModal({ seconds, siteName, onComplete, onCancel }: { seconds: number; siteName: string; onComplete: () => void; onCancel: () => void }) {
   const [remaining, setRemaining] = useState(seconds);
 
   useEffect(() => {
@@ -173,10 +173,9 @@ function VisitCountdownModal({ seconds, onComplete, onCancel }: { seconds: numbe
           <Globe size={36} className="text-blue-400" />
         </div>
 
-        <h3 className="text-white font-black text-lg mb-1">Website Visit</h3>
+        <h3 className="text-white font-black text-lg mb-1">Visiting: {siteName}</h3>
         <p className="text-white/40 text-xs mb-6">Stay on the website to earn reward</p>
 
-        {/* Circular progress */}
         <div className="relative w-32 h-32 mx-auto mb-6">
           <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
             <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="8" />
@@ -205,7 +204,7 @@ function VisitCountdownModal({ seconds, onComplete, onCancel }: { seconds: numbe
   );
 }
 
-// Visit time not completed popup
+// Visit incomplete popup — 15 seconds required
 function VisitIncompleteModal({ onTryAgain, onLater }: { onTryAgain: () => void; onLater: () => void }) {
   return (
     <motion.div
@@ -257,7 +256,7 @@ function VisitIncompleteModal({ onTryAgain, onLater }: { onTryAgain: () => void;
 export default function AdsPage() {
   const { user, refreshUser } = useUser();
   const { showReward } = useRewardPopup();
-  const { showRewardAd, showMonetag, showGigapub, adsgramReady } = useAds();
+  const { showRewardAd, showMonetag, showGigapub, showRandomAd, adsgramReady } = useAds();
 
   const [activeTab, setActiveTab] = useState<AdsTab>('watch');
   const [providers, setProviders] = useState<ProviderWithCount[]>([]);
@@ -265,13 +264,15 @@ export default function AdsPage() {
   const [watching, setWatching] = useState<string | null>(null);
   const [countdowns, setCountdowns] = useState<Record<string, number>>({});
   const [showNotClicked, setShowNotClicked] = useState(false);
+  const [showAdError, setShowAdError] = useState(false);
+  const [adErrorMessage, setAdErrorMessage] = useState('Ad failed to play. Please try again.');
   const [lastWatchedProvider, setLastWatchedProvider] = useState<ProviderWithCount | null>(null);
 
-  // Ad watching progress modal
+  // Ad watching progress modal state
   const [showAdProgress, setShowAdProgress] = useState(false);
   const [adProgressSeconds, setAdProgressSeconds] = useState(0);
   const [adProgressProvider, setAdProgressProvider] = useState<ProviderWithCount | null>(null);
-  const adProgressResolveRef = useRef<(() => void) | null>(null);
+  const adProgressResolveRef = useRef<((completed: boolean) => void) | null>(null);
 
   // Visit websites state
   const [websites, setWebsites] = useState<VisitWebsite[]>([]);
@@ -317,8 +318,8 @@ export default function AdsPage() {
     }, 1000);
   }, []);
 
-  // Show ad progress modal and return promise that resolves when done
-  const showAdProgressModal = useCallback((seconds: number, provider: ProviderWithCount): Promise<void> => {
+  // Show ad progress modal — resolves true if completed, false if cancelled
+  const showAdProgressModal = useCallback((seconds: number, provider: ProviderWithCount): Promise<boolean> => {
     return new Promise((resolve) => {
       setAdProgressSeconds(seconds);
       setAdProgressProvider(provider);
@@ -331,7 +332,7 @@ export default function AdsPage() {
     setShowAdProgress(false);
     setAdProgressProvider(null);
     if (adProgressResolveRef.current) {
-      adProgressResolveRef.current();
+      adProgressResolveRef.current(true);
       adProgressResolveRef.current = null;
     }
   }, []);
@@ -339,8 +340,25 @@ export default function AdsPage() {
   const handleAdProgressCancel = useCallback(() => {
     setShowAdProgress(false);
     setAdProgressProvider(null);
-    adProgressResolveRef.current = null;
+    if (adProgressResolveRef.current) {
+      adProgressResolveRef.current(false);
+      adProgressResolveRef.current = null;
+    }
   }, []);
+
+  // Record successful ad watch and reward
+  const rewardAdWatch = useCallback(async (provider: ProviderWithCount) => {
+    const res = await recordAdWatch(user!.id, provider.id, provider.reward_per_ad);
+    if (res.success) {
+      showReward(provider.reward_per_ad, 'Ad Watched!', `+${provider.reward_per_ad} Hive earned`, '📺');
+      toast.success(`+${provider.reward_per_ad} Hive earned!`, { icon: '🐝' });
+      setProviders(prev => prev.map(p => p.id === provider.id ? { ...p, todayCount: p.todayCount + 1 } : p));
+      await refreshUser();
+    } else {
+      toast.error(res.message);
+    }
+    startCountdown(provider.id, 5);
+  }, [user, showReward, refreshUser, startCountdown]);
 
   const handleWatchAd = useCallback(async (provider: ProviderWithCount) => {
     if (!user || watching || countdowns[provider.id] !== undefined) return;
@@ -355,105 +373,110 @@ export default function AdsPage() {
     const minWatchSeconds = provider.min_watch_seconds || 5;
 
     try {
-      // Adsgram with block 36138 (rewarded) - requires click verification
+      let adPlayed = false;
+
+      // Adsgram rewarded (block 36138) — requires click verification
       if (provider.block_id === '36138') {
         const result = await showRewardAd();
         if (result.success && result.clicked) {
-          // Show countdown after ad completes
-          await showAdProgressModal(minWatchSeconds, provider);
-          const res = await recordAdWatch(user.id, provider.id, provider.reward_per_ad);
-          if (res.success) {
-            showReward(provider.reward_per_ad, 'Ad Watched!', `+${provider.reward_per_ad} Hive earned`, '📺');
-            toast.success(`+${provider.reward_per_ad} Hive earned!`, { icon: '🐝' });
-            setProviders(prev => prev.map(p => p.id === provider.id ? { ...p, todayCount: p.todayCount + 1 } : p));
-            await refreshUser();
+          adPlayed = true;
+          const completed = await showAdProgressModal(minWatchSeconds, provider);
+          if (completed) {
+            await rewardAdWatch(provider);
+          } else {
+            // User cancelled the countdown — no reward
+            setAdErrorMessage('You cancelled the ad before it finished. No reward given.');
+            setShowAdError(true);
+            startCountdown(provider.id, 5);
           }
-          startCountdown(provider.id, 5);
         } else if (result.watched && !result.clicked) {
+          // Ad watched but not clicked — no reward
           setShowNotClicked(true);
           startCountdown(provider.id, 5);
         } else {
-          // Ad didn't play - show error
-          toast.error('Ad not available. Try again.');
+          // Ad didn't play at all — error popup
+          setAdErrorMessage('Ad failed to play. Please try again.');
+          setShowAdError(true);
           startCountdown(provider.id, 5);
         }
       }
-      // Adsgram with block int-36139 (interstitial) - timer based
+      // Adsgram interstitial (int-36139) or adsgram slug
       else if (provider.block_id === 'int-36139' || (provider.network_type === 'adsgram' && provider.slug === 'adsgram')) {
-        let adShown = false;
         if (adsgramReady()) {
           try {
             const controller = window.Adsgram!.init({ blockId: 'int-36139' });
             await controller.show();
-            adShown = true;
-          } catch { /* ignore */ }
+            adPlayed = true;
+          } catch { /* ad failed */ }
         }
 
-        if (adShown) {
-          // Show countdown modal
-          await showAdProgressModal(minWatchSeconds, provider);
-          const res = await recordAdWatch(user.id, provider.id, provider.reward_per_ad);
-          if (res.success) {
-            showReward(provider.reward_per_ad, 'Ad Watched!', `+${provider.reward_per_ad} Hive earned`, '📺');
-            toast.success(`+${provider.reward_per_ad} Hive earned!`, { icon: '🐝' });
-            setProviders(prev => prev.map(p => p.id === provider.id ? { ...p, todayCount: p.todayCount + 1 } : p));
-            await refreshUser();
+        if (adPlayed) {
+          const completed = await showAdProgressModal(minWatchSeconds, provider);
+          if (completed) {
+            await rewardAdWatch(provider);
+          } else {
+            setAdErrorMessage('You cancelled the ad before it finished. No reward given.');
+            setShowAdError(true);
+            startCountdown(provider.id, 5);
           }
-          startCountdown(provider.id, 5);
         } else {
-          toast.error('Ad not available. Try again.');
+          setAdErrorMessage('Ad failed to play. Please try again.');
+          setShowAdError(true);
           startCountdown(provider.id, 5);
         }
       }
-      // Monetag - min 5 seconds watch required
+      // Monetag — minimum 5 seconds watch required
       else if (provider.network_type === 'monetag' || provider.slug === 'monetag') {
         const { opened } = await showMonetag();
         if (opened) {
-          // Show countdown modal
-          await showAdProgressModal(minWatchSeconds, provider);
-          const res = await recordAdWatch(user.id, provider.id, provider.reward_per_ad);
-          if (res.success) {
-            showReward(provider.reward_per_ad, 'Ad Watched!', `+${provider.reward_per_ad} Hive earned`, '💰');
-            toast.success(`+${provider.reward_per_ad} Hive earned!`, { icon: '💰' });
-            setProviders(prev => prev.map(p => p.id === provider.id ? { ...p, todayCount: p.todayCount + 1 } : p));
-            await refreshUser();
+          adPlayed = true;
+          const completed = await showAdProgressModal(Math.max(minWatchSeconds, 5), provider);
+          if (completed) {
+            await rewardAdWatch(provider);
+          } else {
+            setAdErrorMessage('You cancelled the ad before it finished. No reward given.');
+            setShowAdError(true);
+            startCountdown(provider.id, 5);
           }
-          startCountdown(provider.id, 5);
         } else {
-          toast.error('Ad not available. Try again.');
+          setAdErrorMessage('Monetag ad failed to play. Please try again.');
+          setShowAdError(true);
           startCountdown(provider.id, 5);
         }
       }
-      // Gigapub - timer based with verification
+      // Gigapub — timer based with verification
       else if (provider.network_type === 'gigapub' || provider.slug === 'gigapub') {
         const { success } = await showGigapub();
         if (success) {
-          // Show countdown modal
-          await showAdProgressModal(minWatchSeconds, provider);
-          const res = await recordAdWatch(user.id, provider.id, provider.reward_per_ad);
-          if (res.success) {
-            showReward(provider.reward_per_ad, 'Ad Watched!', `+${provider.reward_per_ad} Hive earned`, '📢');
-            toast.success(`+${provider.reward_per_ad} Hive earned!`, { icon: '📢' });
-            setProviders(prev => prev.map(p => p.id === provider.id ? { ...p, todayCount: p.todayCount + 1 } : p));
-            await refreshUser();
+          adPlayed = true;
+          const completed = await showAdProgressModal(minWatchSeconds, provider);
+          if (completed) {
+            await rewardAdWatch(provider);
+          } else {
+            setAdErrorMessage('You cancelled the ad before it finished. No reward given.');
+            setShowAdError(true);
+            startCountdown(provider.id, 5);
           }
-          startCountdown(provider.id, 5);
         } else {
-          toast.error('Ad not available. Try again.');
+          setAdErrorMessage('Gigapub ad failed to play. Please try again.');
+          setShowAdError(true);
           startCountdown(provider.id, 5);
         }
       } else {
-        toast.error('Ad provider not configured');
+        setAdErrorMessage('Ad provider not configured properly.');
+        setShowAdError(true);
         startCountdown(provider.id, 5);
       }
     } catch {
-      toast.error('Something went wrong');
+      setAdErrorMessage('Something went wrong. Please try again.');
+      setShowAdError(true);
       startCountdown(provider.id, 5);
     } finally {
       setWatching(null);
     }
-  }, [user, watching, countdowns, showRewardAd, showMonetag, showGigapub, adsgramReady, showReward, refreshUser, startCountdown, showAdProgressModal]);
+  }, [user, watching, countdowns, showRewardAd, showMonetag, showGigapub, adsgramReady, showAdProgressModal, rewardAdWatch, startCountdown]);
 
+  // Visit website handler — opens site, shows countdown, stops if cancelled
   const handleVisitWebsite = useCallback(async (website: VisitWebsite) => {
     if (!user || visiting || visitedToday.includes(website.id)) return;
 
@@ -487,22 +510,9 @@ export default function AdsPage() {
   const handleVisitCountdownCancel = useCallback(() => {
     setShowVisitCountdown(false);
     setVisiting(null);
-    setCurrentVisitingSite(null);
+    // Keep currentVisitingSite so the incomplete modal can use it for "Try Again"
     setVisitIncomplete(true);
   }, []);
-
-  const handleClaimVisit = useCallback(async (website: VisitWebsite) => {
-    if (!user) return;
-    const res = await recordWebsiteVisit(user.id, website.id, website.reward_hive);
-    if (res.success) {
-      showReward(website.reward_hive, 'Visit Reward!', `+${website.reward_hive} Hive earned`, '🌐');
-      toast.success(`+${website.reward_hive} Hive earned!`, { icon: '🌐' });
-      setVisitedToday(prev => [...prev, website.id]);
-      await refreshUser();
-    } else {
-      toast.error(res.message);
-    }
-  }, [user, showReward, refreshUser]);
 
   const providerIcon: Record<string, string> = { adsgram: '🎯', monetag: '💰', gigapub: '📢' };
   const providerColor: Record<string, string> = { adsgram: 'text-blue-400', monetag: 'text-green-400', gigapub: 'text-yellow-400' };
@@ -510,6 +520,9 @@ export default function AdsPage() {
 
   const totalTodayEarnings = providers.reduce((sum, p) => sum + p.todayCount * p.reward_per_ad, 0);
   const totalAvailable = providers.reduce((sum, p) => sum + Math.max(0, p.daily_limit - p.todayCount) * p.reward_per_ad, 0);
+
+  // Countdown for when all ads are done — show next available time
+  const allAdsDone = providers.length > 0 && providers.every(p => p.todayCount >= p.daily_limit);
 
   return (
     <div className="min-h-dvh px-4 pt-4 pb-24">
@@ -540,6 +553,14 @@ export default function AdsPage() {
           </div>
         </GlassCard>
       </motion.div>
+
+      {/* All ads done message */}
+      {allAdsDone && activeTab === 'watch' && !loading && (
+        <div className="mb-4 p-3 bg-green-500/10 border border-green-500/20 rounded-xl flex items-center gap-2">
+          <CheckCircle size={16} className="text-green-400" />
+          <p className="text-green-300/80 text-xs">All ads watched for today! Come back tomorrow after daily reset (00:00 UTC).</p>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-2 mb-5 p-1 bg-white/[0.04] rounded-2xl">
@@ -699,6 +720,17 @@ export default function AdsPage() {
         )}
       </AnimatePresence>
 
+      {/* Ad error popup */}
+      <AnimatePresence>
+        {showAdError && lastWatchedProvider && (
+          <AdErrorModal
+            message={adErrorMessage}
+            onRetry={() => { setShowAdError(false); handleWatchAd(lastWatchedProvider); }}
+            onLater={() => setShowAdError(false)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Ad watching progress modal */}
       <AnimatePresence>
         {showAdProgress && adProgressProvider && (
@@ -716,6 +748,7 @@ export default function AdsPage() {
         {showVisitCountdown && currentVisitingSite && (
           <VisitCountdownModal
             seconds={currentVisitingSite.min_watch_seconds || 15}
+            siteName={currentVisitingSite.title || 'Website'}
             onComplete={handleVisitCountdownComplete}
             onCancel={handleVisitCountdownCancel}
           />
@@ -732,5 +765,67 @@ export default function AdsPage() {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+// Ad Not Clicked modal — kept at bottom for reference
+function AdNotClickedModal({ onWatchAgain, onLater }: { onWatchAgain: () => void; onLater: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-end justify-center pb-8 px-4"
+      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+      onClick={onLater}
+    >
+      <motion.div
+        initial={{ y: 100, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 100, opacity: 0 }}
+        onClick={e => e.stopPropagation()}
+        className="w-full max-w-md rounded-3xl overflow-hidden"
+        style={{ background: 'rgba(20,20,20,0.98)', border: '1px solid rgba(255,255,255,0.08)' }}
+      >
+        <div className="p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-14 h-14 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center flex-shrink-0">
+              <MousePointer size={28} className="text-yellow-400" />
+            </div>
+            <div>
+              <p className="text-red-400 font-black text-lg leading-tight">Ad Not Clicked!</p>
+              <p className="text-white/40 text-xs uppercase tracking-widest">Click Required to Earn</p>
+            </div>
+          </div>
+
+          <div className="p-3 mb-4 rounded-xl border border-red-500/20 bg-red-500/5 flex items-start gap-2">
+            <AlertCircle size={14} className="text-red-400 mt-0.5 flex-shrink-0" />
+            <p className="text-red-400/80 text-xs">Tap the advertiser&apos;s button to earn<br /><span className="text-white/40">Full ad watch + CTA click = reward. Skipping = no payout.</span></p>
+          </div>
+
+          <div className="space-y-2.5 mb-5">
+            {[
+              { icon: '👁', text: 'Watch the full ad' },
+              { icon: '⚡', text: "Tap advertiser's button" },
+              { icon: '🍯', text: 'Come back & claim reward' },
+            ].map(({ icon, text }) => (
+              <div key={text} className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-white/[0.05] flex items-center justify-center text-base">{icon}</div>
+                <span className="text-white/70 text-sm">{text}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <motion.button whileTap={{ scale: 0.96 }} onClick={onWatchAgain} className="py-3 rounded-2xl font-bold text-sm" style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff' }}>
+              <span className="flex items-center justify-center gap-2"><PlayCircle size={16} /> Watch Again</span>
+            </motion.button>
+            <motion.button whileTap={{ scale: 0.96 }} onClick={onLater} className="py-3 rounded-2xl font-bold text-sm bg-white/[0.06] text-white/60">
+              Later
+            </motion.button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }

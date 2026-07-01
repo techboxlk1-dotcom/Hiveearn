@@ -69,7 +69,11 @@ export default function ReferralPage() {
     if (!user || claiming || unclaimedHive <= 0) return;
     setClaiming(true);
     try {
-      await showRandomAd();
+      const adResult = await showRandomAd();
+      if (!adResult.success) {
+        toast.error('Ad not played. No reward without watching an ad.');
+        return;
+      }
       const result = await claimReferralRewards(user.id);
       if (result.success) {
         toast.success(result.message);

@@ -55,6 +55,8 @@ export interface User {
   total_earned: number;
   total_withdrawn: number;
   total_ads_watched: number;
+  withdraw_unlocked_at: string | null;
+  last_reminder_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -96,6 +98,8 @@ export interface Withdrawal {
   reviewed_at: string | null;
   withdraw_id: string | null;
   ad_block: number;
+  payment_method: 'manual' | 'auto';
+  auto_txid: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -166,6 +170,7 @@ export interface Task {
   sort_order: number;
   is_active: boolean;
   requires_verification: boolean;
+  task_type: 'channel' | 'bot' | 'link';
   created_at: string;
   updated_at: string;
 }

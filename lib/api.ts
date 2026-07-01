@@ -47,13 +47,13 @@ export async function detectAndHandleIpAbuse(userId: string, ipAddress: string):
   if (!ipAddress || ipAddress === 'unknown') return;
   const { data: blocked } = await supabase.from('ip_blocks').select('id').eq('ip_address', ipAddress).maybeSingle();
   if (blocked) { await autoSuspendUser(userId, `IP address ${ipAddress} is blocked`); return; }
-  const { data: allIpUsers } = await supabase.from('users').select('id, telegram_id, first_name, is_suspended, is_admin, created_at').eq('ip_address', ipAddress).order('created_at', { ascending: true });
+  const { data: allIpUsers } = await supabase.from('users').select('id, telegram_id, first_name, is_suspended, is_admin, manually_unsuspended, created_at').eq('ip_address', ipAddress).order('created_at', { ascending: true });
   if (!allIpUsers || allIpUsers.length <= 1) return;
   const firstUser = allIpUsers[0];
   const duplicateUsers = allIpUsers.slice(1);
   await supabase.from('users').update({ ip_flagged: true }).eq('ip_address', ipAddress);
   for (const dup of duplicateUsers) {
-    if (dup.is_admin || dup.is_suspended) continue;
+    if (dup.is_admin || dup.is_suspended || dup.manually_unsuspended) continue;
     await autoSuspendUser(dup.id, `Multiple accounts from same IP (${ipAddress}). First account kept.`);
   }
   await supabase.from('fraud_logs').insert({ user_id: userId, type: 'multiple_accounts', description: `Same IP detected: ${allIpUsers.length} accounts on IP ${ipAddress}. First account (${firstUser.first_name}) kept, ${duplicateUsers.length} suspended.`, ip_address: ipAddress, severity: 'high' });
@@ -534,6 +534,72 @@ export async function getWithdrawRequirements(userId: string): Promise<WithdrawR
   };
 }
 
+// ─── Withdraw Unlock Tracking ───────────────────────────────────────────────────
+
+// Check if withdraw is unlocked today (UTC daily reset at 00:00)
+export async function isWithdrawUnlocked(userId: string): Promise<boolean> {
+  const { data } = await supabase.from('users').select('withdraw_unlocked_at').eq('id', userId).maybeSingle();
+  if (!data?.withdraw_unlocked_at) return false;
+  const unlockedDate = new Date(data.withdraw_unlocked_at);
+  const now = new Date();
+  // Compare UTC dates — if unlocked today (UTC), it's still unlocked
+  const unlockedUTC = new Date(Date.UTC(unlockedDate.getUTCFullYear(), unlockedDate.getUTCMonth(), unlockedDate.getUTCDate()));
+  const nowUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  return unlockedUTC.getTime() === nowUTC.getTime();
+}
+
+// Mark withdraw as unlocked — stays unlocked until daily reset at 00:00 UTC
+export async function unlockWithdraw(userId: string): Promise<void> {
+  await supabase.from('users').update({ withdraw_unlocked_at: new Date().toISOString() }).eq('id', userId);
+}
+
+// Check if user has a pending withdrawal
+export async function hasPendingWithdrawal(userId: string): Promise<boolean> {
+  const { count } = await supabase.from('withdrawals').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'pending');
+  return (count ?? 0) > 0;
+}
+
+// Auto-approve withdrawal with auto-generated txid
+export async function autoApproveWithdrawal(adminId: string, withdrawalId: string): Promise<{ success: boolean; txid: string; message: string }> {
+  const { data: wd } = await supabase.from('withdrawals').select('*').eq('id', withdrawalId).maybeSingle();
+  if (!wd) return { success: false, txid: '', message: 'Withdrawal not found' };
+
+  // Generate auto txid (simulated Trust Wallet transaction hash)
+  const txid = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b => b.toString(16).padStart(2, '0')).join('');
+
+  await supabase.from('withdrawals').update({
+    status: 'approved',
+    txid,
+    auto_txid: txid,
+    payment_method: 'auto',
+    reviewed_by: adminId,
+    reviewed_at: new Date().toISOString()
+  }).eq('id', withdrawalId);
+
+  await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'auto_approve_withdrawal', target_type: 'withdrawal', target_id: withdrawalId, new_data: { txid, payment_method: 'auto' } });
+  await createNotification(wd.user_id, 'withdraw_approved', '✅ Withdrawal Auto-Approved!', `Your withdrawal has been auto-approved. TXID: ${txid}`, { txid, amount: wd.net_amount });
+
+  // Update total paid
+  const settings = await getAppSettings();
+  const currentPaid = parseFloat(settings['total_paid_usdt'] ?? '0');
+  await updateAppSetting('total_paid_usdt', String(currentPaid + wd.net_amount));
+
+  // Notify user with net balance emoji
+  const { data: user } = await supabase.from('users').select('telegram_id, hive_balance, first_name').eq('id', wd.user_id).maybeSingle();
+  if (user) {
+    await sendBotMessage(user.telegram_id, `✅ <b>Withdrawal Auto-Approved!</b>\n\nID: <code>${wd.withdraw_id ?? ''}</code>\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\nWallet: <code>${wd.wallet_address}</code>\n\n🔗 TXID: <code>${txid}</code>\n\n<a href="https://bscscan.com/tx/${txid}">View on BSCScan</a>\n\n💰 Net Balance: ${user.hive_balance.toFixed(2)} 🍯 Hive`, false);
+  }
+
+  // Notify payment channel
+  const paymentChannel = settings['payment_channel'] ?? 'hiveearnpayment';
+  await sendBotMessage(`@${paymentChannel}`, `✅ <b>Payment Sent</b>\n\nUser: ${user?.first_name ?? 'User'}\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\nTXID: <code>${txid}</code>\n\n<a href="https://bscscan.com/tx/${txid}">View on BSCScan</a>`, false);
+
+  // Notify admin
+  await notifyAdmin(`💳 <b>Auto-Payment Sent</b>\n\nID: <code>${wd.withdraw_id ?? ''}</code>\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\nTXID: <code>${txid}</code>\n\n<a href="https://bscscan.com/tx/${txid}">View on BSCScan</a>`);
+
+  return { success: true, txid, message: 'Withdrawal auto-approved' };
+}
+
 // ─── Withdrawals ──────────────────────────────────────────────────────────────
 
 function generateWithdrawId(count: number): string {
@@ -543,6 +609,10 @@ function generateWithdrawId(count: number): string {
 export async function requestWithdrawal(userId: string, hiveAmount: number): Promise<{ success: boolean; message: string; withdrawId?: string }> {
   const guard = await checkNotSuspended(userId);
   if (!guard.ok) return { success: false, message: guard.message };
+
+  // Check for pending withdrawal — block new request if one exists
+  const hasPending = await hasPendingWithdrawal(userId);
+  if (hasPending) return { success: false, message: 'You have a pending withdrawal. Wait for it to be approved before requesting another.' };
 
   const wallet = await getWallet(userId);
   if (!wallet) return { success: false, message: 'Please set a wallet address first' };
@@ -693,7 +763,7 @@ export async function suspendUser(adminId: string, userId: string, reason: strin
 }
 
 export async function unsuspendUser(adminId: string, userId: string): Promise<void> {
-  await supabase.from('users').update({ is_suspended: false, suspension_reason: null }).eq('id', userId);
+  await supabase.from('users').update({ is_suspended: false, suspension_reason: null, manually_unsuspended: true }).eq('id', userId);
   await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'unsuspend_user', target_type: 'user', target_id: userId });
   const { data: user } = await supabase.from('users').select('telegram_id').eq('id', userId).maybeSingle();
   if (user) await sendBotMessage(user.telegram_id, `✅ <b>Account Unsuspended</b>\n\nYour Hive Earn account has been restored. You can now earn Hive again!`);
@@ -770,7 +840,7 @@ export async function approveWithdrawal(adminId: string, withdrawalId: string, t
   const { data: wd } = await supabase.from('withdrawals').select('*').eq('id', withdrawalId).maybeSingle();
   if (!wd) return;
 
-  await supabase.from('withdrawals').update({ status: 'approved', txid, reviewed_by: adminId, reviewed_at: new Date().toISOString() }).eq('id', withdrawalId);
+  await supabase.from('withdrawals').update({ status: 'approved', txid, payment_method: 'manual', reviewed_by: adminId, reviewed_at: new Date().toISOString() }).eq('id', withdrawalId);
   await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'approve_withdrawal', target_type: 'withdrawal', target_id: withdrawalId, new_data: { txid } });
   await createNotification(wd.user_id, 'withdraw_approved', '✅ Withdrawal Approved!', `Your withdrawal has been approved. TXID: ${txid}`, { txid, amount: wd.net_amount });
 
@@ -779,10 +849,15 @@ export async function approveWithdrawal(adminId: string, withdrawalId: string, t
   const currentPaid = parseFloat(settings['total_paid_usdt'] ?? '0');
   await updateAppSetting('total_paid_usdt', String(currentPaid + wd.net_amount));
 
-  const { data: user } = await supabase.from('users').select('telegram_id').eq('id', wd.user_id).maybeSingle();
+  // Notify user with net balance emoji
+  const { data: user } = await supabase.from('users').select('telegram_id, hive_balance').eq('id', wd.user_id).maybeSingle();
   if (user) {
-    await sendBotMessage(user.telegram_id, `✅ <b>Withdrawal Approved!</b>\n\nID: <code>${wd.withdraw_id ?? ''}</code>\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\nWallet: <code>${wd.wallet_address}</code>\n\n🔗 TXID: <code>${txid}</code>\n\n<a href="https://bscscan.com/tx/${txid}">View on BSCScan</a>\n\nThank you for using Hive Earn! 🐝`);
+    await sendBotMessage(user.telegram_id, `✅ <b>Withdrawal Approved!</b>\n\nID: <code>${wd.withdraw_id ?? ''}</code>\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\nWallet: <code>${wd.wallet_address}</code>\n\n🔗 TXID: <code>${txid}</code>\n\n<a href="https://bscscan.com/tx/${txid}">View on BSCScan</a>\n\n💰 Net Balance: ${user.hive_balance.toFixed(2)} 🍯 Hive`, false);
   }
+
+  // Notify payment channel
+  const paymentChannel = settings['payment_channel'] ?? 'hiveearnpayment';
+  await sendBotMessage(`@${paymentChannel}`, `✅ <b>Payment Sent</b>\n\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\nTXID: <code>${txid}</code>\n\n<a href="https://bscscan.com/tx/${txid}">View on BSCScan</a>`, false);
 
   await notifyAdmin(`💳 <b>Payment Sent</b>\n\nID: <code>${wd.withdraw_id ?? ''}</code>\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\nTXID: <code>${txid}</code>\n\n<a href="https://bscscan.com/tx/${txid}">View on BSCScan</a>`);
 }

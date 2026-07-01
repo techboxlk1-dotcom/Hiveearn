@@ -43,7 +43,11 @@ export default function RewardCodePage() {
     if (!user || !code.trim() || claiming) return;
     setClaiming(true);
     try {
-      await showRandomAd();
+      const adResult = await showRandomAd();
+      if (!adResult.success) {
+        toast.error('Ad not played. No reward without watching an ad.');
+        return;
+      }
       const result = await claimRewardCode(user.id, code.trim());
       if (result.success) {
         setEarned(result.hive);

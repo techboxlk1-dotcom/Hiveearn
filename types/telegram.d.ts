@@ -61,6 +61,6 @@ interface Window {
     init: (params: { blockId: string; debug?: boolean; debugBannerType?: string }) => AdsgramController;
   };
   show_11196790?: () => void;
-  showGiga?: () => Promise<{ success?: boolean }>;
+  showGiga?: () => Promise<{ success?: boolean }> | void;
   __hive_home_ad_callback?: () => void;
 }

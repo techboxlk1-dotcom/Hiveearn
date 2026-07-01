@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import HiveBalance from '@/components/ui/HiveBalance';
-import { setWallet, getWallet, requestWithdrawal, getUserWithdrawals, getWithdrawRequirements } from '@/lib/api';
+import { setWallet, getWallet, requestWithdrawal, getUserWithdrawals, getWithdrawRequirements, isWithdrawUnlocked, unlockWithdraw, hasPendingWithdrawal } from '@/lib/api';
 import type { Withdrawal } from '@/lib/supabase';
 import type { WithdrawRequirementsResult } from '@/lib/api';
 import { formatUsdt, hiveToUsdt, isValidBep20Address, timeAgo, truncateAddress } from '@/lib/utils';
@@ -61,6 +61,25 @@ export default function WalletPage() {
 
   const handleOpenWithdraw = async () => {
     if (!savedWallet) { setView('set-wallet'); return; }
+    // Check if already unlocked today (UTC daily reset)
+    const unlocked = await isWithdrawUnlocked(user.id);
+    if (unlocked) {
+      // Already unlocked today — skip requirements and ad gate, go straight to withdraw
+      setReqLoading(true);
+      const reqs = await getWithdrawRequirements(user.id);
+      setRequirements(reqs);
+      setReqLoading(false);
+      setAdsWatched(2);
+      setAdProgress(100);
+      setView('withdraw');
+      return;
+    }
+    // Check for pending withdrawal
+    const hasPending = await hasPendingWithdrawal(user.id);
+    if (hasPending) {
+      toast.error('You have a pending withdrawal. Wait for it to be approved before requesting another.');
+      return;
+    }
     setReqLoading(true);
     const reqs = await getWithdrawRequirements(user.id);
     setRequirements(reqs);
@@ -79,13 +98,16 @@ export default function WalletPage() {
     setWatchingAd(true);
     setAdProgress(((adsWatched) / 2) * 100);
     const result = await showRewardAd();
-    const newCount = adsWatched + 1;
-    setAdsWatched(newCount);
-    setAdProgress((newCount / 2) * 100);
-    setWatchingAd(false);
-    if (!result.success) {
-      toast.error('Please watch the full ad to continue');
+    if (result.success && result.clicked) {
+      // Only count on success
+      const newCount = adsWatched + 1;
+      setAdsWatched(newCount);
+      setAdProgress((newCount / 2) * 100);
+      toast.success(`Ad ${newCount}/2 watched!`);
+    } else {
+      toast.error('Ad not completed. Please watch the full ad to continue.');
     }
+    setWatchingAd(false);
   }, [watchingAd, adsWatched, showRewardAd]);
 
   const handleWithdraw = async () => {
@@ -412,7 +434,9 @@ export default function WalletPage() {
                   style={{ background: 'linear-gradient(135deg,#F5C518,#FFB300)', color: '#0A0A0A' }}
                 >
                   {watchingAd ? (
-                    <><motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full" /> Opening Ad...</>
+                    <><motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full" /> Opening Ad {adsWatched + 1}...</>
+                  ) : adsWatched === 1 ? (
+                    <><Clock size={20} /> Watch Ad 2 (5s countdown)</>
                   ) : (
                     <><PlayCircle size={20} /> Watch Ad {adsWatched + 1}</>
                   )}
@@ -420,7 +444,11 @@ export default function WalletPage() {
               ) : (
                 <motion.button
                   whileTap={{ scale: 0.96 }}
-                  onClick={() => setView('withdraw')}
+                  onClick={async () => {
+                    // Unlock withdraw for today (persists until daily reset at 00:00 UTC)
+                    await unlockWithdraw(user.id);
+                    setView('withdraw');
+                  }}
                   className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2"
                   style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff' }}
                   initial={{ opacity: 0, scale: 0.9 }}
