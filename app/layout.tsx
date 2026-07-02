@@ -33,6 +33,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
         {/* Gigapub SDK */}
         <Script src="https://ad.gigapub.tech/script?id=7069" strategy="afterInteractive" />
+        {/* Monetix Ads SDK */}
+        <Script src="https://www.monetixads.online/ads.js" data-mxid="MX-BEF52AF7" strategy="afterInteractive" />
         <UserProvider>
           <LanguageProvider telegramLangCode={typeof window !== 'undefined' ? window.Telegram?.WebApp?.initDataUnsafe?.user?.language_code : undefined}>
             <RewardPopupProvider>

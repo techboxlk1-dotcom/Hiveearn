@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, PlayCircle, CheckCircle, Globe, MousePointer, Clock, ExternalLink, AlertCircle, Timer, XCircle } from 'lucide-react';
+import { ArrowLeft, PlayCircle, CheckCircle, Globe, Clock, ExternalLink, AlertCircle, Timer, XCircle, Info, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
@@ -19,149 +19,131 @@ interface ProviderWithCount extends AdProvider {
   todayCount: number;
 }
 
-// ─── Ad Closed Early popup ─────────────────────────────────────────────────────
-// Shown when user closes/skips the ad before the timer completes.
-function AdClosedEarlyModal({ onRetry, onLater }: { onRetry: () => void; onLater: () => void }) {
+// ─── Centered Modal Wrapper ───────────────────────────────────────────────────
+function CenteredModal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end justify-center pb-8 px-4"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
-      onClick={onLater}
+      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }}
+      onClick={onClose}
     >
       <motion.div
-        initial={{ y: 100, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        exit={{ y: 100, opacity: 0 }}
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.9, opacity: 0, y: 20 }}
         onClick={e => e.stopPropagation()}
         className="w-full max-w-md rounded-3xl overflow-hidden"
         style={{ background: 'rgba(20,20,20,0.98)', border: '1px solid rgba(255,255,255,0.08)' }}
       >
-        <div className="p-5">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center flex-shrink-0">
-              <XCircle size={28} className="text-red-400" />
-            </div>
-            <div>
-              <p className="text-red-400 font-black text-lg leading-tight">Ad Closed Too Early!</p>
-              <p className="text-white/40 text-xs uppercase tracking-widest">No Reward Given</p>
-            </div>
-          </div>
-
-          <div className="p-3 mb-4 rounded-xl border border-red-500/20 bg-red-500/5 flex items-start gap-2">
-            <AlertCircle size={14} className="text-red-400 mt-0.5 flex-shrink-0" />
-            <p className="text-red-400/80 text-xs">
-              You closed the ad before the timer finished.<br />
-              <span className="text-white/40">You must keep the ad open for the full duration to earn Hive.</span>
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <motion.button whileTap={{ scale: 0.96 }} onClick={onRetry} className="py-3 rounded-2xl font-bold text-sm" style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff' }}>
-              <span className="flex items-center justify-center gap-2"><PlayCircle size={16} /> Try Again</span>
-            </motion.button>
-            <motion.button whileTap={{ scale: 0.96 }} onClick={onLater} className="py-3 rounded-2xl font-bold text-sm bg-white/[0.06] text-white/60">
-              Later
-            </motion.button>
-          </div>
-        </div>
+        {children}
       </motion.div>
     </motion.div>
+  );
+}
+
+// ─── Ad Closed Early popup ─────────────────────────────────────────────────────
+function AdClosedEarlyModal({ onRetry, onLater }: { onRetry: () => void; onLater: () => void }) {
+  return (
+    <CenteredModal onClose={onLater}>
+      <div className="p-6 text-center">
+        <div className="w-20 h-20 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto mb-5">
+          <XCircle size={40} className="text-red-400" />
+        </div>
+        <h2 className="text-red-400 font-black text-xl mb-2">Ad Closed Too Early!</h2>
+        <p className="text-white/40 text-sm mb-5">You must watch the ad for the full duration to earn Hive.</p>
+        <div className="p-4 mb-5 rounded-xl bg-red-500/10 border border-red-500/20">
+          <p className="text-red-300/80 text-sm">
+            The ad was closed before the timer finished. Keep the ad open for the entire duration to receive your reward.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <motion.button whileTap={{ scale: 0.96 }} onClick={onRetry} className="py-3.5 rounded-xl font-bold text-sm" style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff' }}>
+            <span className="flex items-center justify-center gap-2"><RefreshCw size={16} /> Try Again</span>
+          </motion.button>
+          <motion.button whileTap={{ scale: 0.96 }} onClick={onLater} className="py-3.5 rounded-xl font-bold text-sm bg-white/[0.06] text-white/60">
+            Later
+          </motion.button>
+        </div>
+      </div>
+    </CenteredModal>
   );
 }
 
 // ─── Ad error popup ────────────────────────────────────────────────────────────
 function AdErrorModal({ message, onRetry, onLater }: { message: string; onRetry: () => void; onLater: () => void }) {
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end justify-center pb-8 px-4"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
-      onClick={onLater}
-    >
-      <motion.div
-        initial={{ y: 100, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        exit={{ y: 100, opacity: 0 }}
-        onClick={e => e.stopPropagation()}
-        className="w-full max-w-md rounded-3xl overflow-hidden"
-        style={{ background: 'rgba(20,20,20,0.98)', border: '1px solid rgba(255,255,255,0.08)' }}
-      >
-        <div className="p-5">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center flex-shrink-0">
-              <AlertCircle size={28} className="text-red-400" />
-            </div>
-            <div>
-              <p className="text-red-400 font-black text-lg leading-tight">Ad Not Played!</p>
-              <p className="text-white/40 text-xs uppercase tracking-widest">No Reward Without Ad</p>
-            </div>
-          </div>
-
-          <div className="p-3 mb-4 rounded-xl border border-red-500/20 bg-red-500/5 flex items-start gap-2">
-            <AlertCircle size={14} className="text-red-400 mt-0.5 flex-shrink-0" />
-            <p className="text-red-400/80 text-xs">{message}<br /><span className="text-white/40">You must watch the ad to earn a reward.</span></p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <motion.button whileTap={{ scale: 0.96 }} onClick={onRetry} className="py-3 rounded-2xl font-bold text-sm" style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff' }}>
-              <span className="flex items-center justify-center gap-2"><PlayCircle size={16} /> Try Again</span>
-            </motion.button>
-            <motion.button whileTap={{ scale: 0.96 }} onClick={onLater} className="py-3 rounded-2xl font-bold text-sm bg-white/[0.06] text-white/60">
-              Later
-            </motion.button>
-          </div>
+    <CenteredModal onClose={onLater}>
+      <div className="p-6 text-center">
+        <div className="w-20 h-20 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center mx-auto mb-5">
+          <AlertCircle size={40} className="text-yellow-400" />
         </div>
-      </motion.div>
-    </motion.div>
+        <h2 className="text-yellow-400 font-black text-xl mb-2">Ad Not Played!</h2>
+        <p className="text-white/40 text-sm mb-5">No reward without watching an ad.</p>
+        <div className="p-4 mb-5 rounded-xl bg-yellow-500/10 border border-yellow-500/20">
+          <p className="text-yellow-300/80 text-sm">{message}</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <motion.button whileTap={{ scale: 0.96 }} onClick={onRetry} className="py-3.5 rounded-xl font-bold text-sm" style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff' }}>
+            <span className="flex items-center justify-center gap-2"><RefreshCw size={16} /> Try Again</span>
+          </motion.button>
+          <motion.button whileTap={{ scale: 0.96 }} onClick={onLater} className="py-3.5 rounded-xl font-bold text-sm bg-white/[0.06] text-white/60">
+            Later
+          </motion.button>
+        </div>
+      </div>
+    </CenteredModal>
   );
 }
 
-// ─── Concurrent ad+timer modal ─────────────────────────────────────────────────
-// Shows a live countdown WHILE the ad plays.
-// If ad closes before timer reaches 0 → resolve(false) → no reward
-// If timer reaches 0 while ad still open → resolve(true) → reward
+// ─── Ad Timer Modal - shows countdown while ad is playing ──────────────────────
 function AdTimerModal({
   seconds,
   providerName,
-  adClosed,
-  onComplete,
-  onAdClosedEarly,
+  onExpired,
 }: {
   seconds: number;
   providerName: string;
-  adClosed: boolean;
-  onComplete: () => void;
-  onAdClosedEarly: () => void;
+  onExpired: () => void;
 }) {
   const [remaining, setRemaining] = useState(seconds);
+  const [adOpened, setAdOpened] = useState(false);
   const finishedRef = useRef(false);
 
-  // Countdown effect — ticks every second
+  // Detect when ad is actually showing by watching for visibility change
   useEffect(() => {
-    if (remaining <= 0) {
-      if (!finishedRef.current) {
-        finishedRef.current = true;
-        onComplete();
+    const onVisChange = () => {
+      if (document.visibilityState === 'visible') {
+        // User came back - ad closed
+        setAdOpened(false);
+      } else {
+        // User left - ad opened
+        setAdOpened(true);
       }
-      return;
-    }
-    const timer = setTimeout(() => setRemaining(r => r - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [remaining, onComplete]);
+    };
+    document.addEventListener('visibilitychange', onVisChange);
+    return () => document.removeEventListener('visibilitychange', onVisChange);
+  }, []);
 
-  // Ad closed early effect — fires immediately when adClosed becomes true
-  // and timer hasn't finished
+  // Countdown only when ad is showing
   useEffect(() => {
-    if (adClosed && remaining > 0 && !finishedRef.current) {
-      finishedRef.current = true;
-      onAdClosedEarly();
-    }
-  }, [adClosed, remaining, onAdClosedEarly]);
+    if (!adOpened || remaining <= 0) return;
+
+    const timer = setTimeout(() => {
+      if (!finishedRef.current) {
+        const newRemaining = remaining - 1;
+        setRemaining(newRemaining);
+        if (newRemaining <= 0) {
+          finishedRef.current = true;
+          onExpired();
+        }
+      }
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [adOpened, remaining, onExpired]);
 
   const progress = ((seconds - remaining) / seconds) * 100;
 
@@ -171,7 +153,7 @@ function AdTimerModal({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-[60] flex items-center justify-center px-4"
-      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }}
+      style={{ background: 'rgba(0,0,0,0.9)', backdropFilter: 'blur(12px)' }}
     >
       <motion.div
         initial={{ scale: 0.9, opacity: 0 }}
@@ -185,9 +167,11 @@ function AdTimerModal({
         </div>
 
         <h3 className="text-white font-black text-lg mb-1">{providerName}</h3>
-        <p className="text-white/40 text-xs mb-6">Watch the ad to earn reward</p>
+        <p className="text-white/40 text-xs mb-4">
+          {adOpened ? 'Watching ad...' : 'Opening ad...'}
+        </p>
 
-        <div className="relative w-32 h-32 mx-auto mb-6">
+        <div className="relative w-32 h-32 mx-auto mb-4">
           <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
             <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="8" />
             <circle
@@ -201,7 +185,10 @@ function AdTimerModal({
           </div>
         </div>
 
-        <p className="text-white/30 text-xs">Keep the ad open until timer ends</p>
+        <p className="text-white/30 text-xs flex items-center justify-center gap-1">
+          <Info size={12} />
+          Keep the ad open until timer ends
+        </p>
       </motion.div>
     </motion.div>
   );
@@ -223,26 +210,14 @@ function VisitCountdownModal({ seconds, siteName, onComplete, onCancel }: { seco
   const progress = ((seconds - remaining) / seconds) * 100;
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center px-4"
-      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }}
-    >
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        className="w-full max-w-sm rounded-3xl overflow-hidden text-center p-6"
-        style={{ background: 'rgba(20,20,20,0.98)', border: '1px solid rgba(255,255,255,0.08)' }}
-      >
-        <div className="w-20 h-20 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mx-auto mb-4">
+    <CenteredModal onClose={onCancel}>
+      <div className="p-6 text-center">
+        <div className="w-20 h-20 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mx-auto mb-5">
           <Globe size={36} className="text-blue-400" />
         </div>
 
         <h3 className="text-white font-black text-lg mb-1">Visiting: {siteName}</h3>
-        <p className="text-white/40 text-xs mb-6">Stay on the website to earn reward</p>
+        <p className="text-white/40 text-sm mb-6">Stay on the website to earn reward</p>
 
         <div className="relative w-32 h-32 mx-auto mb-6">
           <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
@@ -258,128 +233,43 @@ function VisitCountdownModal({ seconds, siteName, onComplete, onCancel }: { seco
           </div>
         </div>
 
-        <p className="text-white/30 text-xs">Complete the countdown to earn +5 Hive</p>
+        <p className="text-white/30 text-xs mb-4">Complete the countdown to earn +5 Hive</p>
 
         <motion.button
           whileTap={{ scale: 0.95 }}
           onClick={onCancel}
-          className="mt-4 px-4 py-2 rounded-xl bg-red-500/15 border border-red-500/20 text-red-400 text-xs font-bold"
+          className="px-6 py-2.5 rounded-xl bg-red-500/15 border border-red-500/20 text-red-400 text-sm font-bold"
         >
           Cancel Visit
         </motion.button>
-      </motion.div>
-    </motion.div>
+      </div>
+    </CenteredModal>
   );
 }
 
 // ─── Visit incomplete popup ────────────────────────────────────────────────────
 function VisitIncompleteModal({ onTryAgain, onLater }: { onTryAgain: () => void; onLater: () => void }) {
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end justify-center pb-8 px-4"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
-      onClick={onLater}
-    >
-      <motion.div
-        initial={{ y: 100, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        exit={{ y: 100, opacity: 0 }}
-        onClick={e => e.stopPropagation()}
-        className="w-full max-w-md rounded-3xl overflow-hidden"
-        style={{ background: 'rgba(20,20,20,0.98)', border: '1px solid rgba(255,255,255,0.08)' }}
-      >
-        <div className="p-5">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center flex-shrink-0">
-              <Clock size={28} className="text-red-400" />
-            </div>
-            <div>
-              <p className="text-red-400 font-black text-lg leading-tight">Time Not Completed!</p>
-              <p className="text-white/40 text-xs uppercase tracking-widest">15 Seconds Required</p>
-            </div>
-          </div>
-
-          <div className="p-3 mb-4 rounded-xl border border-red-500/20 bg-red-500/5 flex items-start gap-2">
-            <AlertCircle size={14} className="text-red-400 mt-0.5 flex-shrink-0" />
-            <p className="text-red-400/80 text-xs">You must stay on the website for at least 15 seconds.<br /><span className="text-white/40">Closing early = no reward.</span></p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <motion.button whileTap={{ scale: 0.96 }} onClick={onTryAgain} className="py-3 rounded-2xl font-bold text-sm" style={{ background: 'linear-gradient(135deg,#3b82f6,#1d4ed8)', color: '#fff' }}>
-              <span className="flex items-center justify-center gap-2"><Globe size={16} /> Try Again</span>
-            </motion.button>
-            <motion.button whileTap={{ scale: 0.96 }} onClick={onLater} className="py-3 rounded-2xl font-bold text-sm bg-white/[0.06] text-white/60">
-              Later
-            </motion.button>
-          </div>
+    <CenteredModal onClose={onLater}>
+      <div className="p-6 text-center">
+        <div className="w-20 h-20 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto mb-5">
+          <Clock size={40} className="text-red-400" />
         </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-// ─── Ad Not Clicked modal ──────────────────────────────────────────────────────
-function AdNotClickedModal({ onWatchAgain, onLater }: { onWatchAgain: () => void; onLater: () => void }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end justify-center pb-8 px-4"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
-      onClick={onLater}
-    >
-      <motion.div
-        initial={{ y: 100, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        exit={{ y: 100, opacity: 0 }}
-        onClick={e => e.stopPropagation()}
-        className="w-full max-w-md rounded-3xl overflow-hidden"
-        style={{ background: 'rgba(20,20,20,0.98)', border: '1px solid rgba(255,255,255,0.08)' }}
-      >
-        <div className="p-5">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-14 h-14 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center flex-shrink-0">
-              <MousePointer size={28} className="text-yellow-400" />
-            </div>
-            <div>
-              <p className="text-red-400 font-black text-lg leading-tight">Ad Not Clicked!</p>
-              <p className="text-white/40 text-xs uppercase tracking-widest">Click Required to Earn</p>
-            </div>
-          </div>
-
-          <div className="p-3 mb-4 rounded-xl border border-red-500/20 bg-red-500/5 flex items-start gap-2">
-            <AlertCircle size={14} className="text-red-400 mt-0.5 flex-shrink-0" />
-            <p className="text-red-400/80 text-xs">Tap the advertiser&apos;s button to earn<br /><span className="text-white/40">Full ad watch + CTA click = reward. Skipping = no payout.</span></p>
-          </div>
-
-          <div className="space-y-2.5 mb-5">
-            {[
-              { icon: '👁', text: 'Watch the full ad' },
-              { icon: '⚡', text: "Tap advertiser's button" },
-              { icon: '🍯', text: 'Come back & claim reward' },
-            ].map(({ icon, text }) => (
-              <div key={text} className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-white/[0.05] flex items-center justify-center text-base">{icon}</div>
-                <span className="text-white/70 text-sm">{text}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <motion.button whileTap={{ scale: 0.96 }} onClick={onWatchAgain} className="py-3 rounded-2xl font-bold text-sm" style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff' }}>
-              <span className="flex items-center justify-center gap-2"><PlayCircle size={16} /> Watch Again</span>
-            </motion.button>
-            <motion.button whileTap={{ scale: 0.96 }} onClick={onLater} className="py-3 rounded-2xl font-bold text-sm bg-white/[0.06] text-white/60">
-              Later
-            </motion.button>
-          </div>
+        <h2 className="text-red-400 font-black text-xl mb-2">Time Not Completed!</h2>
+        <p className="text-white/40 text-sm mb-5">15 seconds required</p>
+        <div className="p-4 mb-5 rounded-xl bg-red-500/10 border border-red-500/20">
+          <p className="text-red-300/80 text-sm">You must stay on the website for at least 15 seconds. Closing early = no reward.</p>
         </div>
-      </motion.div>
-    </motion.div>
+        <div className="grid grid-cols-2 gap-3">
+          <motion.button whileTap={{ scale: 0.96 }} onClick={onTryAgain} className="py-3.5 rounded-xl font-bold text-sm" style={{ background: 'linear-gradient(135deg,#3b82f6,#1d4ed8)', color: '#fff' }}>
+            <span className="flex items-center justify-center gap-2"><RefreshCw size={16} /> Try Again</span>
+          </motion.button>
+          <motion.button whileTap={{ scale: 0.96 }} onClick={onLater} className="py-3.5 rounded-xl font-bold text-sm bg-white/[0.06] text-white/60">
+            Later
+          </motion.button>
+        </div>
+      </div>
+    </CenteredModal>
   );
 }
 
@@ -389,25 +279,24 @@ function AdNotClickedModal({ onWatchAgain, onLater }: { onWatchAgain: () => void
 export default function AdsPage() {
   const { user, refreshUser } = useUser();
   const { showReward } = useRewardPopup();
-  const { showRewardAd, startAdAndDetectClose, adsgramReady } = useAds();
+  const { showRewardAd, startAdWithTimer, adsgramReady } = useAds();
 
   const [activeTab, setActiveTab] = useState<AdsTab>('watch');
   const [providers, setProviders] = useState<ProviderWithCount[]>([]);
   const [loading, setLoading] = useState(true);
   const [watching, setWatching] = useState<string | null>(null);
   const [countdowns, setCountdowns] = useState<Record<string, number>>({});
-  const [showNotClicked, setShowNotClicked] = useState(false);
   const [showAdError, setShowAdError] = useState(false);
   const [showAdClosedEarly, setShowAdClosedEarly] = useState(false);
   const [adErrorMessage, setAdErrorMessage] = useState('Ad failed to play. Please try again.');
   const [lastWatchedProvider, setLastWatchedProvider] = useState<ProviderWithCount | null>(null);
 
-  // Concurrent ad+timer modal state
+  // Timer modal state
   const [showAdTimer, setShowAdTimer] = useState(false);
-  const [adTimerSeconds, setAdTimerSeconds] = useState(0);
+  const [adTimerSeconds, setAdTimerSeconds] = useState(5);
   const [adTimerProvider, setAdTimerProvider] = useState<ProviderWithCount | null>(null);
-  const [adClosedFlag, setAdClosedFlag] = useState(false);
-  const timerResolveRef = useRef<((watched: boolean) => void) | null>(null);
+  const timerExpiredRef = useRef(false);
+  const adResultRef = useRef<{ opened: boolean; watchTime: number } | null>(null);
 
   // Visit websites state
   const [websites, setWebsites] = useState<VisitWebsite[]>([]);
@@ -418,6 +307,29 @@ export default function AdsPage() {
   const [visitIncomplete, setVisitIncomplete] = useState(false);
 
   const countdownRefs = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+
+  // Daily reset countdown
+  const [dailyResetSeconds, setDailyResetSeconds] = useState(0);
+
+  // Calculate daily reset time (next 00:00 UTC)
+  useEffect(() => {
+    const updateResetTime = () => {
+      const now = new Date();
+      const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+      const secondsLeft = Math.floor((tomorrow.getTime() - now.getTime()) / 1000);
+      setDailyResetSeconds(secondsLeft);
+    };
+    updateResetTime();
+    const interval = setInterval(updateResetTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const formatDailyReset = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -438,7 +350,7 @@ export default function AdsPage() {
     load();
   }, [user]);
 
-  const startCountdown = useCallback((id: string, seconds: number, onDone?: () => void) => {
+  const startCountdown = useCallback((id: string, seconds: number) => {
     if (countdownRefs.current[id]) clearInterval(countdownRefs.current[id]);
     setCountdowns(prev => ({ ...prev, [id]: seconds }));
     let remaining = seconds;
@@ -448,70 +360,12 @@ export default function AdsPage() {
       if (remaining <= 0) {
         clearInterval(countdownRefs.current[id]);
         setCountdowns(prev => { const n = { ...prev }; delete n[id]; return n; });
-        onDone?.();
       }
     }, 1000);
   }, []);
 
-  // ─── Concurrent ad + timer ──────────────────────────────────────────────────
-  // Starts the ad SDK and the timer modal AT THE SAME TIME.
-  // Returns true if timer completed before ad closed → reward
-  // Returns false if ad closed before timer → no reward
-  const runAdWithTimer = useCallback(async (provider: ProviderWithCount): Promise<boolean> => {
-    const minWatchSeconds = provider.min_watch_seconds || 5;
-
-    // Start the timer modal AND the ad simultaneously
-    const timerPromise = new Promise<boolean>((resolve) => {
-      timerResolveRef.current = resolve;
-      setAdTimerSeconds(minWatchSeconds);
-      setAdTimerProvider(provider);
-      setAdClosedFlag(false);
-      setShowAdTimer(true);
-    });
-
-    // Start ad SDK with close detection — runs concurrently with timer
-    const adPromise = startAdAndDetectClose(provider).then((result) => {
-      // Ad closed/skipped — notify the timer modal
-      setAdClosedFlag(true);
-      return result;
-    });
-
-    const [watched, adResult] = await Promise.all([timerPromise, adPromise]);
-
-    // Clean up modal
-    setShowAdTimer(false);
-    setAdTimerProvider(null);
-    timerResolveRef.current = null;
-
-    // If ad never opened at all, that's an error not "closed early"
-    if (!adResult.opened && !watched) {
-      return 'error' as unknown as boolean;
-    }
-
-    return watched;
-  }, [startAdAndDetectClose]);
-
-  // Timer modal callbacks
-  const handleTimerComplete = useCallback(() => {
-    setShowAdTimer(false);
-    setAdTimerProvider(null);
-    if (timerResolveRef.current) {
-      timerResolveRef.current(true); // timer finished → ad watched → reward
-      timerResolveRef.current = null;
-    }
-  }, []);
-
-  const handleAdClosedEarly = useCallback(() => {
-    setShowAdTimer(false);
-    setAdTimerProvider(null);
-    if (timerResolveRef.current) {
-      timerResolveRef.current(false); // ad closed before timer → no reward
-      timerResolveRef.current = null;
-    }
-  }, []);
-
-  // Record successful ad watch and reward
-  const rewardAdWatch = useCallback(async (provider: ProviderWithCount) => {
+  // Give reward and record
+  const giveReward = useCallback(async (provider: ProviderWithCount) => {
     const res = await recordAdWatch(user!.id, provider.id, provider.reward_per_ad);
     if (res.success) {
       showReward(provider.reward_per_ad, 'Ad Watched!', `+${provider.reward_per_ad} Hive earned`, '📺');
@@ -524,7 +378,18 @@ export default function AdsPage() {
     startCountdown(provider.id, 5);
   }, [user, showReward, refreshUser, startCountdown]);
 
-  // ─── Main watch ad handler ──────────────────────────────────────────────────
+  // Handle timer expired - ad watched fully
+  const handleTimerExpired = useCallback(async () => {
+    timerExpiredRef.current = true;
+    setShowAdTimer(false);
+    if (adTimerProvider) {
+      await giveReward(adTimerProvider);
+    }
+    setWatching(null);
+    setAdTimerProvider(null);
+  }, [adTimerProvider, giveReward]);
+
+  // Main watch ad handler
   const handleWatchAd = useCallback(async (provider: ProviderWithCount) => {
     if (!user || watching || countdowns[provider.id] !== undefined) return;
     if (provider.todayCount >= provider.daily_limit) {
@@ -534,59 +399,55 @@ export default function AdsPage() {
 
     setWatching(provider.id);
     setLastWatchedProvider(provider);
+    timerExpiredRef.current = false;
+    adResultRef.current = null;
+
+    const blockId = provider.block_id ?? '';
+    const minWatchSeconds = provider.min_watch_seconds || 5;
+
+    // Start timer modal
+    setAdTimerSeconds(minWatchSeconds);
+    setAdTimerProvider(provider);
+    setShowAdTimer(true);
 
     try {
-      const blockId = provider.block_id ?? '';
+      // Start ad and get result
+      const result = await startAdWithTimer(provider);
+      adResultRef.current = { opened: result.opened, watchTime: result.watchTimeSeconds };
 
-      // Adsgram rewarded (block 36138) — requires click verification
-      if (blockId === '36138') {
-        const result = await showRewardAd();
-        if (result.success && result.clicked) {
-          // Ad clicked — now run concurrent timer + ad display
-          const watched = await runAdWithTimer(provider);
-          if (watched === true) {
-            await rewardAdWatch(provider);
-          } else if (watched === false) {
-            // Ad closed early or timer cancelled
-            setShowAdClosedEarly(true);
-            startCountdown(provider.id, 5);
-          } else {
-            // Ad didn't open
-            setAdErrorMessage('Ad failed to play. Please try again.');
-            setShowAdError(true);
-            startCountdown(provider.id, 5);
-          }
-        } else if (result.watched && !result.clicked) {
-          setShowNotClicked(true);
-          startCountdown(provider.id, 5);
-        } else {
-          setAdErrorMessage('Ad failed to play. Please try again.');
-          setShowAdError(true);
-          startCountdown(provider.id, 5);
-        }
+      // If timer already expired (rewards given), don't show errors
+      if (timerExpiredRef.current) {
+        return;
       }
-      // All other providers: run ad + timer concurrently
-      else {
-        const watched = await runAdWithTimer(provider);
-        if (watched === true) {
-          await rewardAdWatch(provider);
-        } else if (watched === false) {
-          setShowAdClosedEarly(true);
-          startCountdown(provider.id, 5);
-        } else {
-          setAdErrorMessage('Ad failed to play. Please try again.');
-          setShowAdError(true);
-          startCountdown(provider.id, 5);
-        }
+
+      // Check if actual watch time met minimum requirement
+      if (result.opened && result.watchTimeSeconds >= minWatchSeconds) {
+        // Watched enough - give reward
+        setShowAdTimer(false);
+        await giveReward(provider);
+      } else if (!result.opened) {
+        // Ad never opened
+        setShowAdTimer(false);
+        setAdErrorMessage('Ad failed to play. Please try again.');
+        setShowAdError(true);
+        startCountdown(provider.id, 5);
+      } else {
+        // Ad opened but closed early
+        setShowAdTimer(false);
+        setShowAdClosedEarly(true);
+        startCountdown(provider.id, 5);
       }
     } catch {
-      setAdErrorMessage('Something went wrong. Please try again.');
-      setShowAdError(true);
-      startCountdown(provider.id, 5);
+      if (!timerExpiredRef.current) {
+        setShowAdTimer(false);
+        setAdErrorMessage('Something went wrong. Please try again.');
+        setShowAdError(true);
+        startCountdown(provider.id, 5);
+      }
     } finally {
       setWatching(null);
     }
-  }, [user, watching, countdowns, showRewardAd, runAdWithTimer, rewardAdWatch, startCountdown]);
+  }, [user, watching, countdowns, startAdWithTimer, giveReward, startCountdown]);
 
   // Visit website handler
   const handleVisitWebsite = useCallback(async (website: VisitWebsite) => {
@@ -594,7 +455,6 @@ export default function AdsPage() {
 
     setVisiting(website.id);
     setCurrentVisitingSite(website);
-
     window.open(website.url, '_blank');
     setShowVisitCountdown(true);
   }, [user, visiting, visitedToday]);
@@ -622,9 +482,9 @@ export default function AdsPage() {
     setVisitIncomplete(true);
   }, []);
 
-  const providerIcon: Record<string, string> = { adsgram: '🎯', monetag: '💰', gigapub: '📢' };
-  const providerColor: Record<string, string> = { adsgram: 'text-blue-400', monetag: 'text-green-400', gigapub: 'text-yellow-400' };
-  const providerBg: Record<string, string> = { adsgram: 'from-blue-900/30', monetag: 'from-green-900/30', gigapub: 'from-yellow-900/30' };
+  const providerIcon: Record<string, string> = { adsgram: '🎯', monetag: '💰', gigapub: '📢', monetix: '🎬' };
+  const providerColor: Record<string, string> = { adsgram: 'text-blue-400', monetag: 'text-green-400', gigapub: 'text-yellow-400', monetix: 'text-purple-400' };
+  const providerBg: Record<string, string> = { adsgram: 'from-blue-900/30', monetag: 'from-green-900/30', gigapub: 'from-yellow-900/30', monetix: 'from-purple-900/30' };
 
   const totalTodayEarnings = providers.reduce((sum, p) => sum + p.todayCount * p.reward_per_ad, 0);
   const totalAvailable = providers.reduce((sum, p) => sum + Math.max(0, p.daily_limit - p.todayCount) * p.reward_per_ad, 0);
@@ -646,7 +506,7 @@ export default function AdsPage() {
 
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mb-5">
         <GlassCard gold className="p-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-3">
             <div>
               <p className="text-white/40 text-[10px] font-semibold uppercase tracking-widest">Today Earned</p>
               <p className="text-hive-gold font-black text-2xl">{totalTodayEarnings} HIVE</p>
@@ -656,13 +516,20 @@ export default function AdsPage() {
               <p className="text-green-400 font-bold text-lg">{totalAvailable} HIVE</p>
             </div>
           </div>
+          <div className="pt-3 border-t border-white/[0.06] flex items-center justify-between">
+            <p className="text-white/30 text-xs">Daily reset in:</p>
+            <p className="text-hive-gold font-mono text-sm font-bold">{formatDailyReset(dailyResetSeconds)}</p>
+          </div>
         </GlassCard>
       </motion.div>
 
       {allAdsDone && activeTab === 'watch' && !loading && (
         <div className="mb-4 p-3 bg-green-500/10 border border-green-500/20 rounded-xl flex items-center gap-2">
           <CheckCircle size={16} className="text-green-400" />
-          <p className="text-green-300/80 text-xs">All ads watched for today! Come back tomorrow after daily reset (00:00 UTC).</p>
+          <div className="flex-1">
+            <p className="text-green-300/80 text-xs">All ads watched for today!</p>
+            <p className="text-white/30 text-[10px]">Resets in {formatDailyReset(dailyResetSeconds)}</p>
+          </div>
         </div>
       )}
 
@@ -813,15 +680,13 @@ export default function AdsPage() {
         )}
       </AnimatePresence>
 
-      {/* Concurrent ad + timer modal */}
+      {/* Timer modal */}
       <AnimatePresence>
         {showAdTimer && adTimerProvider && (
           <AdTimerModal
             seconds={adTimerSeconds}
             providerName={adTimerProvider.name}
-            adClosed={adClosedFlag}
-            onComplete={handleTimerComplete}
-            onAdClosedEarly={handleAdClosedEarly}
+            onExpired={handleTimerExpired}
           />
         )}
       </AnimatePresence>
@@ -832,16 +697,6 @@ export default function AdsPage() {
           <AdClosedEarlyModal
             onRetry={() => { setShowAdClosedEarly(false); handleWatchAd(lastWatchedProvider); }}
             onLater={() => setShowAdClosedEarly(false)}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Ad Not Clicked popup */}
-      <AnimatePresence>
-        {showNotClicked && lastWatchedProvider && (
-          <AdNotClickedModal
-            onWatchAgain={() => { setShowNotClicked(false); handleWatchAd(lastWatchedProvider); }}
-            onLater={() => setShowNotClicked(false)}
           />
         )}
       </AnimatePresence>

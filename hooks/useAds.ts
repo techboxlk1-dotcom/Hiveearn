@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 
 export interface AdResult {
   success: boolean;
@@ -16,11 +16,13 @@ export interface RandomAdResult {
 export interface AdCloseResult {
   opened: boolean;
   closed: boolean;
+  watchTimeSeconds: number; // How long the ad was actually visible
 }
 
 export function useAds() {
   const adsgramReady = useCallback(() => typeof window !== 'undefined' && !!window.Adsgram, []);
 
+  // Auto ad - just shows without complex tracking
   const showAutoAd = useCallback(async () => {
     if (!adsgramReady()) return;
     try {
@@ -31,6 +33,7 @@ export function useAds() {
     }
   }, [adsgramReady]);
 
+  // Reward ad with proper tracking
   const showRewardAd = useCallback((): Promise<AdResult> => {
     return new Promise((resolve) => {
       if (!adsgramReady()) {
@@ -53,7 +56,7 @@ export function useAds() {
     });
   }, [adsgramReady]);
 
-  // Random network ad — returns whether ad actually played
+  // Random network ad
   const showRandomAd = useCallback(async (): Promise<RandomAdResult> => {
     const options = ['adsgram', 'monetag', 'gigapub'];
     const shuffled = [...options].sort(() => Math.random() - 0.5);
@@ -88,125 +91,169 @@ export function useAds() {
     return { success: false, network: 'none' };
   }, [adsgramReady]);
 
-  // ─── Concurrent ad display with close detection ────────────────────────────
-  //
-  // This function calls the ad SDK AND sets up close detection simultaneously.
-  // It returns a promise that resolves when the ad is closed/skipped.
-  // The caller should race this against a countdown timer:
-  //   - If timer completes first → ad watched → give reward
-  //   - If ad closes first → ad skipped → no reward
-  //
-  // For Adsgram: uses the SDK's own promise (resolves on close)
-  // For Monetag/Gigapub: uses blur/focus + visibilitychange to detect close
-
-  const startAdAndDetectClose = useCallback((provider: {
+  // Track actual watch time using visibility API
+  const startAdWithTimer = useCallback((provider: {
     block_id?: string | null;
     network_type?: string | null;
     slug?: string | null;
+    min_watch_seconds?: number | null;
   }): Promise<AdCloseResult> => {
     return new Promise((resolve) => {
+      const minWatchSeconds = provider.min_watch_seconds || 5;
       let resolved = false;
       let adOpened = false;
-      let listenersAttached = false;
-      let noOpenTimer: ReturnType<typeof setTimeout> | undefined;
+      let adStartTime = 0;
+      let totalWatchTime = 0;
+      let timerInterval: ReturnType<typeof setInterval> | undefined;
       let safetyTimer: ReturnType<typeof setTimeout> | undefined;
 
       const cleanup = () => {
-        if (listenersAttached) {
-          window.removeEventListener('blur', onBlur);
-          window.removeEventListener('focus', onFocus);
-          document.removeEventListener('visibilitychange', onVisChange);
-          listenersAttached = false;
-        }
+        if (timerInterval) clearInterval(timerInterval);
+        // Visibility listeners keep running to detect when user returns
       };
 
       const finish = (result: AdCloseResult) => {
         if (resolved) return;
         resolved = true;
         cleanup();
-        if (noOpenTimer) clearTimeout(noOpenTimer);
         if (safetyTimer) clearTimeout(safetyTimer);
         resolve(result);
       };
 
-      const onBlur = () => { adOpened = true; };
-      const onFocus = () => { finish({ opened: adOpened, closed: true }); };
-      const onVisChange = () => {
-        if (document.visibilityState === 'hidden') adOpened = true;
-        if (document.visibilityState === 'visible') finish({ opened: adOpened, closed: true });
+      // Track when app is hidden/visible
+      const onVisibilityChange = () => {
+        if (document.visibilityState === 'hidden') {
+          // User left the app (ad opened or switched away)
+          if (!adOpened) {
+            adOpened = true;
+            adStartTime = Date.now();
+          } else {
+            // Pause counting - user left while ad was playing
+          }
+        } else if (document.visibilityState === 'visible') {
+          // User returned to app
+          if (adOpened) {
+            // Ad closed - user came back from ad
+            totalWatchTime = Math.floor((Date.now() - adStartTime) / 1000);
+            finish({ opened: adOpened, closed: true, watchTimeSeconds: totalWatchTime });
+          }
+        }
       };
+
+      // Also track blur/focus for web
+      const onBlur = () => {
+        if (!adOpened) {
+          adOpened = true;
+          adStartTime = Date.now();
+        }
+      };
+
+      const onFocus = () => {
+        if (adOpened) {
+          totalWatchTime = Math.floor((Date.now() - adStartTime) / 1000);
+          finish({ opened: adOpened, closed: true, watchTimeSeconds: totalWatchTime });
+        }
+      };
+
+      // Set up listeners
+      document.addEventListener('visibilitychange', onVisibilityChange);
+      window.addEventListener('blur', onBlur);
+      window.addEventListener('focus', onFocus);
 
       const blockId = provider.block_id ?? '';
       const isAdsgram = blockId === '36138' || blockId === 'int-36139' ||
         (provider.network_type === 'adsgram' && (provider.slug === 'adsgram' || !provider.slug));
       const isMonetag = provider.network_type === 'monetag' || provider.slug === 'monetag';
       const isGigapub = provider.network_type === 'gigapub' || provider.slug === 'gigapub';
+      const isMonetix = provider.network_type === 'monetix' || provider.slug === 'monetix';
 
-      // For Adsgram: use SDK's own close callback
+      // Safety timeout for cleanup
+      safetyTimer = setTimeout(() => {
+        if (!resolved) {
+          if (adOpened) {
+            totalWatchTime = Math.floor((Date.now() - adStartTime) / 1000);
+          }
+          finish({ opened: adOpened, closed: true, watchTimeSeconds: totalWatchTime });
+        }
+      }, 180000); // 3 minutes max
+
+      // Adsgram has its own promise
       if (isAdsgram && adsgramReady()) {
         try {
           const bid = blockId === '36138' ? '36138' : 'int-36139';
           const controller = window.Adsgram!.init({ blockId: bid });
           controller.show()
             .then((result) => {
-              // Adsgram resolves when ad closes — check if it was watched
-              const opened = !result.error;
-              finish({ opened, closed: true });
+              // Calculate watch time from when ad opened
+              if (adOpened && adStartTime > 0) {
+                totalWatchTime = Math.floor((Date.now() - adStartTime) / 1000);
+              }
+              finish({ opened: !result.error, closed: true, watchTimeSeconds: totalWatchTime });
             })
             .catch(() => {
-              finish({ opened: false, closed: true });
+              finish({ opened: false, closed: true, watchTimeSeconds: 0 });
             });
         } catch {
-          finish({ opened: false, closed: true });
+          finish({ opened: false, closed: true, watchTimeSeconds: 0 });
         }
         return;
       }
 
-      // For Monetag/Gigapub: detect close via blur/focus + visibilitychange
-      if ((isMonetag || isGigapub) && typeof window !== 'undefined') {
-        window.addEventListener('blur', onBlur);
-        window.addEventListener('focus', onFocus);
-        document.addEventListener('visibilitychange', onVisChange);
-        listenersAttached = true;
-
+      // Monetag - call the show function
+      if (isMonetag && typeof window !== 'undefined' && window.show_11196790) {
         try {
-          if (isMonetag && window.show_11196790) {
-            window.show_11196790();
-          } else if (isGigapub && window.showGiga) {
-            const result = window.showGiga();
-            if (result && typeof result.then === 'function') {
-              result.then(() => finish({ opened: adOpened, closed: true }))
-                    .catch(() => finish({ opened: false, closed: true }));
-            }
-          } else {
-            // SDK function doesn't exist
-            finish({ opened: false, closed: true });
-            return;
+          window.show_11196790();
+          // Will be resolved when user returns (visibility change or focus)
+        } catch {
+          finish({ opened: false, closed: true, watchTimeSeconds: 0 });
+        }
+        return;
+      }
+
+      // Gigapub - call the show function
+      if (isGigapub && typeof window !== 'undefined' && window.showGiga) {
+        try {
+          const result = window.showGiga();
+          if (result && typeof result.then === 'function') {
+            result.then(() => {
+              if (adOpened && adStartTime > 0) {
+                totalWatchTime = Math.floor((Date.now() - adStartTime) / 1000);
+              }
+              finish({ opened: adOpened, closed: true, watchTimeSeconds: totalWatchTime });
+            }).catch(() => {
+              finish({ opened: false, closed: true, watchTimeSeconds: 0 });
+            });
+          }
+          // If not a promise, wait for visibility/focus events
+        } catch {
+          finish({ opened: false, closed: true, watchTimeSeconds: 0 });
+        }
+        return;
+      }
+
+      // Monetix - use showRewardAd global function
+      if (isMonetix && typeof window !== 'undefined') {
+        try {
+          // Monetix ads handle via script in layout
+          // Will resolve via visibility events
+          if (window.showRewardAd) {
+            window.showRewardAd((res: { status: string }) => {
+              if (adOpened && adStartTime > 0) {
+                totalWatchTime = Math.floor((Date.now() - adStartTime) / 1000);
+              }
+              finish({ opened: res.status === 'completed' || res.status === 'closed', closed: true, watchTimeSeconds: totalWatchTime });
+            });
           }
         } catch {
-          finish({ opened: false, closed: true });
-          return;
+          finish({ opened: false, closed: true, watchTimeSeconds: 0 });
         }
-
-        // If no blur event within 4 seconds, ad probably didn't open
-        const noOpenTimer = setTimeout(() => {
-          if (!resolved && !adOpened) {
-            finish({ opened: false, closed: true });
-          }
-        }, 4000);
-
-        // Safety timeout: 120 seconds
-        const safetyTimer = setTimeout(() => {
-          finish({ opened: adOpened, closed: true });
-        }, 120000);
-
         return;
       }
 
-      // Unknown provider
-      finish({ opened: false, closed: true });
+      // Unknown provider or SDK not available
+      finish({ opened: false, closed: true, watchTimeSeconds: 0 });
     });
   }, [adsgramReady]);
 
-  return { showAutoAd, showRewardAd, showRandomAd, startAdAndDetectClose, adsgramReady };
+  return { showAutoAd, showRewardAd, showRandomAd, startAdWithTimer, adsgramReady };
 }

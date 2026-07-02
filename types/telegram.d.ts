@@ -53,6 +53,10 @@ interface AdsgramController {
   destroy: () => void;
 }
 
+interface MonetixAdController {
+  show: () => Promise<void>;
+}
+
 interface Window {
   Telegram: {
     WebApp: TelegramWebApp;
@@ -62,5 +66,8 @@ interface Window {
   };
   show_11196790?: () => void;
   showGiga?: () => Promise<{ success?: boolean }> | void;
+  showRewardAd?: (callback: (res: { status: string }) => void) => void;
   __hive_home_ad_callback?: () => void;
+  // Monetix ad SDK
+  showRewardAdMonetix?: (callback: (res: { status: string }) => void) => void;
 }

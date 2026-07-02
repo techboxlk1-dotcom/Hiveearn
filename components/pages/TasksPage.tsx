@@ -22,7 +22,6 @@ interface TaskWithStatus extends Task {
 // Task icon component — handles imgbb URLs and direct image URLs
 function TaskIcon({ iconUrl, category }: { iconUrl: string | null; category: string }) {
   const [imageError, setImageError] = useState(false);
-  const [retryUrl, setRetryUrl] = useState<string | null>(null);
 
   const fallbackEmoji = category === 'community' ? '👥' : category === 'partner' ? '🤝' : '⭐';
 
@@ -30,17 +29,26 @@ function TaskIcon({ iconUrl, category }: { iconUrl: string | null; category: str
     return <span className="text-xl">{fallbackEmoji}</span>;
   }
 
-  // Normalize imgbb URLs to direct image format
-  let imageUrl = iconUrl.trim();
-  if (imageUrl.includes('ibb.co') && !imageUrl.includes('i.ibb.co')) {
-    imageUrl = imageUrl.replace('ibb.co', 'i.ibb.co');
-    if (!imageUrl.match(/\.(png|jpg|jpeg|gif|webp)$/i)) {
-      imageUrl = imageUrl + '.png';
+  // Normalize imgbb URLs — handle both ibb.co and i.ibb.co formats
+  let finalUrl = iconUrl.trim();
+
+  // Convert ibb.co short URLs to direct i.ibb.co format
+  // Example: https://ibb.co/abc123 → https://i.ibb.co/abc123.png
+  if (finalUrl.includes('ibb.co')) {
+    // If it's a short URL like https://ibb.co/abc123
+    const shortMatch = finalUrl.match(/^https?:\/\/ibb\.co\/([a-zA-Z0-9]+)$/i);
+    if (shortMatch) {
+      finalUrl = `https://i.ibb.co/${shortMatch[1]}/image.png`;
+    }
+    // If it's already a direct URL but missing the domain prefix
+    else if (finalUrl.includes('//ibb.co/') && !finalUrl.includes('//i.ibb.co')) {
+      finalUrl = finalUrl.replace('//ibb.co/', '//i.ibb.co/');
+    }
+    // Ensure it has an extension
+    if (!finalUrl.match(/\.(png|jpg|jpeg|gif|webp|PNG|JPG|JPEG|GIF|WEBP)$/i)) {
+      finalUrl = finalUrl + '.png';
     }
   }
-
-  // Use retryUrl if set (e.g., .jpg fallback after .png fails)
-  const finalUrl = retryUrl ?? imageUrl;
 
   return (
     // eslint-disable-next-line @next/next/no-img-element
@@ -50,12 +58,14 @@ function TaskIcon({ iconUrl, category }: { iconUrl: string | null; category: str
       alt="Task icon"
       className="w-full h-full object-cover"
       onError={() => {
-        // If .png fails, try .jpg
-        if (finalUrl.endsWith('.png') && !retryUrl) {
-          setRetryUrl(finalUrl.replace('.png', '.jpg'));
+        // Try alternate formats if loading fails
+        if (finalUrl.endsWith('.png')) {
+          const jpgUrl = finalUrl.replace('.png', '.jpg');
+          // Update src directly via DOM
+          const img = document.querySelector(`img[src="${finalUrl}"]`) as HTMLImageElement;
+          if (img) img.src = jpgUrl;
           return;
         }
-        // If .jpg fails too, show fallback emoji
         setImageError(true);
       }}
     />
