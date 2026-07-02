@@ -559,45 +559,30 @@ export async function hasPendingWithdrawal(userId: string): Promise<boolean> {
   return (count ?? 0) > 0;
 }
 
-// Auto-approve withdrawal with auto-generated txid
+// Auto-approve withdrawal with REAL BSC transaction via edge function
 export async function autoApproveWithdrawal(adminId: string, withdrawalId: string): Promise<{ success: boolean; txid: string; message: string }> {
-  const { data: wd } = await supabase.from('withdrawals').select('*').eq('id', withdrawalId).maybeSingle();
-  if (!wd) return { success: false, txid: '', message: 'Withdrawal not found' };
+  try {
+    // Call the process-auto-withdraw edge function for REAL BSC transaction
+    const { data, error } = await supabase.functions.invoke('process-auto-withdraw', {
+      body: { withdrawal_id: withdrawalId }
+    });
 
-  // Generate auto txid (simulated Trust Wallet transaction hash)
-  const txid = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b => b.toString(16).padStart(2, '0')).join('');
+    if (error) {
+      console.error('Auto-withdraw error:', error);
+      return { success: false, txid: '', message: String(error) };
+    }
 
-  await supabase.from('withdrawals').update({
-    status: 'approved',
-    txid,
-    auto_txid: txid,
-    payment_method: 'auto',
-    reviewed_by: adminId,
-    reviewed_at: new Date().toISOString()
-  }).eq('id', withdrawalId);
+    const result = data as { status: string; txid?: string; error?: string };
 
-  await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'auto_approve_withdrawal', target_type: 'withdrawal', target_id: withdrawalId, new_data: { txid, payment_method: 'auto' } });
-  await createNotification(wd.user_id, 'withdraw_approved', '✅ Withdrawal Auto-Approved!', `Your withdrawal has been auto-approved. TXID: ${txid}`, { txid, amount: wd.net_amount });
-
-  // Update total paid
-  const settings = await getAppSettings();
-  const currentPaid = parseFloat(settings['total_paid_usdt'] ?? '0');
-  await updateAppSetting('total_paid_usdt', String(currentPaid + wd.net_amount));
-
-  // Notify user with net balance emoji
-  const { data: user } = await supabase.from('users').select('telegram_id, hive_balance, first_name').eq('id', wd.user_id).maybeSingle();
-  if (user) {
-    await sendBotMessage(user.telegram_id, `✅ <b>Withdrawal Auto-Approved!</b>\n\nID: <code>${wd.withdraw_id ?? ''}</code>\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\nWallet: <code>${wd.wallet_address}</code>\n\n🔗 TXID: <code>${txid}</code>\n\n<a href="https://bscscan.com/tx/${txid}">View on BSCScan</a>\n\n💰 Net Balance: ${user.hive_balance.toFixed(2)} 🍯 Hive`, false);
+    if (result.status === 'success' && result.txid) {
+      return { success: true, txid: result.txid, message: 'Payment sent successfully!' };
+    } else {
+      return { success: false, txid: '', message: result.error || 'Transaction failed' };
+    }
+  } catch (err) {
+    console.error('Auto-withdraw exception:', err);
+    return { success: false, txid: '', message: String(err) };
   }
-
-  // Notify payment channel
-  const paymentChannel = settings['payment_channel'] ?? 'hiveearnpayment';
-  await sendBotMessage(`@${paymentChannel}`, `✅ <b>Payment Sent</b>\n\nUser: ${user?.first_name ?? 'User'}\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\nTXID: <code>${txid}</code>\n\n<a href="https://bscscan.com/tx/${txid}">View on BSCScan</a>`, false);
-
-  // Notify admin
-  await notifyAdmin(`💳 <b>Auto-Payment Sent</b>\n\nID: <code>${wd.withdraw_id ?? ''}</code>\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\nTXID: <code>${txid}</code>\n\n<a href="https://bscscan.com/tx/${txid}">View on BSCScan</a>`);
-
-  return { success: true, txid, message: 'Withdrawal auto-approved' };
 }
 
 // ─── Withdrawals ──────────────────────────────────────────────────────────────
@@ -852,15 +837,29 @@ export async function approveWithdrawal(adminId: string, withdrawalId: string, t
   const currentPaid = parseFloat(settings['total_paid_usdt'] ?? '0');
   await updateAppSetting('total_paid_usdt', String(currentPaid + wd.net_amount));
 
-  // Notify user with net balance emoji
-  const { data: user } = await supabase.from('users').select('telegram_id, hive_balance').eq('id', wd.user_id).maybeSingle();
+  // Notify user with net balance emoji and proper buttons
+  const { data: user } = await supabase.from('users').select('telegram_id, hive_balance, first_name, username').eq('id', wd.user_id).maybeSingle();
   if (user) {
-    await sendBotMessage(user.telegram_id, `✅ <b>Withdrawal Approved!</b>\n\nID: <code>${wd.withdraw_id ?? ''}</code>\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\nWallet: <code>${wd.wallet_address}</code>\n\n🔗 TXID: <code>${txid}</code>\n\n<a href="https://bscscan.com/tx/${txid}">View on BSCScan</a>\n\n💰 Net Balance: ${user.hive_balance.toFixed(2)} 🍯 Hive`, false);
+    await supabase.functions.invoke('send-bot-message', {
+      body: {
+        chat_id: user.telegram_id,
+        text: `✅ <b>Withdrawal Approved!</b>\n\nID: <code>${wd.withdraw_id ?? ''}</code>\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\nWallet: <code>${wd.wallet_address}</code>\n\n🔗 TXID: <code>${txid}</code>\n\n💰 Net Balance: ${user.hive_balance.toFixed(2)} 🍯 Hive`,
+        payment_type: 'approved',
+        txid: txid
+      }
+    });
   }
 
-  // Notify payment channel
+  // Notify payment channel with proper buttons
   const paymentChannel = settings['payment_channel'] ?? 'hiveearnpayment';
-  await sendBotMessage(`@${paymentChannel}`, `✅ <b>Payment Sent</b>\n\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\nTXID: <code>${txid}</code>\n\n<a href="https://bscscan.com/tx/${txid}">View on BSCScan</a>`, false);
+  await supabase.functions.invoke('send-bot-message', {
+    body: {
+      chat_id: `@${paymentChannel}`,
+      text: `✅ <b>Payment Sent</b>\n\nUser: ${user?.first_name ?? 'User'}${(user as { username?: string })?.username ? ` (@${(user as { username?: string }).username})` : ''}\nID: <code>${user?.telegram_id ?? 'Unknown'}</code>\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\n\n🔗 TXID: <code>${txid}</code>`,
+      payment_type: 'approved',
+      txid: txid
+    }
+  });
 
   await notifyAdmin(`💳 <b>Payment Sent</b>\n\nID: <code>${wd.withdraw_id ?? ''}</code>\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\nTXID: <code>${txid}</code>\n\n<a href="https://bscscan.com/tx/${txid}">View on BSCScan</a>`);
 }

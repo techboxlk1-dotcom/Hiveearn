@@ -1,5 +1,15 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
+/**
+ * SEND-BOT-MESSAGE - Telegram Bot Message Sender
+ *
+ * Handles all outgoing messages from the bot including:
+ * - User notifications
+ * - Payment confirmations
+ * - Admin alerts
+ * - Channel posts
+ */
+
 const BOT_TOKEN = Deno.env.get("BOT_TOKEN") ?? "8969456125:AAFm5CQIhVWpTL6XQDhj-YoVDEojprQWHo4";
 const MINI_APP_URL = Deno.env.get("MINI_APP_URL") ?? "https://t.me/Hiveearnbot/play";
 const ADMIN_CHAT_ID = Deno.env.get("ADMIN_CHAT_ID") ?? "5419054691";
@@ -13,7 +23,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-// Inline keyboard with 3 buttons: Open App, Community, Payment
+// Main keyboard: Open App + Community + Payments
 function getMainKeyboard() {
   return {
     inline_keyboard: [
@@ -26,13 +36,99 @@ function getMainKeyboard() {
   };
 }
 
+// Payment approval keyboard with 3 buttons
+function getPaymentKeyboard(txid: string) {
+  return {
+    inline_keyboard: [
+      [{ text: "🐝 Open Mini App", web_app: { url: MINI_APP_URL } }],
+      [
+        { text: "View Transaction", url: `https://bscscan.com/tx/${txid}` },
+        { text: "Payment Channel", url: `https://t.me/${PAYMENT_CHANNEL}` },
+      ],
+    ],
+  };
+}
+
+// Payment channel post keyboard
+function getPaymentChannelKeyboard(txid: string) {
+  return {
+    inline_keyboard: [
+      [{ text: "🐝 Open Mini App", web_app: { url: MINI_APP_URL } }],
+      [{ text: "View Transaction", url: `https://bscscan.com/tx/${txid}` }],
+    ],
+  };
+}
+
+// User payment notification keyboard
+function getUserPaymentKeyboard(txid: string) {
+  return {
+    inline_keyboard: [
+      [{ text: "View Transaction", url: `https://bscscan.com/tx/${txid}` }],
+      [{ text: "Payment Channel", url: `https://t.me/${PAYMENT_CHANNEL}` }],
+      [{ text: "Open Mini App", web_app: { url: MINI_APP_URL } }],
+    ],
+  };
+}
+
+async function sendMessage(chatId: string | number, text: string, keyboard?: unknown, parseMode = "HTML") {
+  const payload: Record<string, unknown> = {
+    chat_id: chatId,
+    text,
+    parse_mode: parseMode,
+  };
+  if (keyboard) payload.reply_markup = keyboard;
+
+  const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return res.json();
+}
+
+async function sendPhoto(chatId: string | number, photo: string, caption: string, keyboard?: unknown) {
+  const payload: Record<string, unknown> = {
+    chat_id: chatId,
+    photo,
+    caption,
+    parse_mode: "HTML",
+  };
+  if (keyboard) payload.reply_markup = keyboard;
+
+  const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+
+  // Fallback to text if photo fails
+  if (!data.ok) {
+    return sendMessage(chatId, caption, keyboard);
+  }
+  return data;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   try {
-    const { chat_id, text, include_app_button = true, parse_mode = "HTML", include_banner = false } = await req.json();
+    const body = await req.json();
+    const {
+      chat_id,
+      text,
+      include_app_button = true,
+      parse_mode = "HTML",
+      include_banner = false,
+      photo_url,
+      // Payment specific options
+      payment_type,
+      txid,
+      button_name,
+      button_url,
+    } = body;
 
     if (!chat_id || !text) {
       return new Response(JSON.stringify({ error: "chat_id and text required" }), {
@@ -41,76 +137,46 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // If include_banner is true, send photo with banner image
-    if (include_banner && APP_URL) {
-      const photoUrl = `${APP_URL}/IMG-20260624-WA0001.jpg`;
-      const payload: Record<string, unknown> = {
-        chat_id,
-        photo: photoUrl,
-        caption: text,
-        parse_mode,
-      };
-
-      if (include_app_button) {
-        payload.reply_markup = getMainKeyboard();
+    // Handle payment approval messages with special keyboards
+    if (payment_type === "approved" && txid) {
+      // User notification
+      if (!String(chat_id).startsWith("@")) {
+        await sendMessage(chat_id, text, getUserPaymentKeyboard(txid), parse_mode);
+      } else {
+        // Payment channel post
+        await sendMessage(chat_id, text, getPaymentChannelKeyboard(txid), parse_mode);
       }
-
-      const tgRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
 
-      const tgData = await tgRes.json();
+    // Handle custom buttons
+    let customKeyboard: unknown = undefined;
+    if (button_name && button_url) {
+      customKeyboard = {
+        inline_keyboard: [
+          [{ text: button_name, url: button_url }],
+          [{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }],
+        ],
+      };
+    }
 
-      // If photo fails, fall back to text message
-      if (!tgData.ok) {
-        const fallbackPayload: Record<string, unknown> = {
-          chat_id,
-          text,
-          parse_mode,
-        };
-        if (include_app_button) {
-          fallbackPayload.reply_markup = getMainKeyboard();
-        }
-        const fallbackRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(fallbackPayload),
-        });
-        const fallbackData = await fallbackRes.json();
-        return new Response(JSON.stringify({ ok: fallbackData.ok, result: fallbackData.result, error: fallbackData.description }), {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      return new Response(JSON.stringify({ ok: tgData.ok, result: tgData.result, error: tgData.description }), {
-        status: 200,
+    // If include_banner is true, send photo with banner
+    if (include_banner && (photo_url || APP_URL)) {
+      const photo = photo_url || `${APP_URL}/IMG-20260624-WA0001.jpg`;
+      const keyboard = customKeyboard || (include_app_button ? getMainKeyboard() : undefined);
+      await sendPhoto(chat_id, photo, text, keyboard);
+      return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     // Regular text message
-    const payload: Record<string, unknown> = {
-      chat_id,
-      text,
-      parse_mode,
-    };
+    const keyboard = customKeyboard || (include_app_button ? getMainKeyboard() : undefined);
+    const result = await sendMessage(chat_id, text, keyboard, parse_mode);
 
-    if (include_app_button) {
-      payload.reply_markup = getMainKeyboard();
-    }
-
-    const tgRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    const tgData = await tgRes.json();
-
-    return new Response(JSON.stringify({ ok: tgData.ok, result: tgData.result, error: tgData.description }), {
+    return new Response(JSON.stringify({ ok: result.ok, result: result.result, error: result.description }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
