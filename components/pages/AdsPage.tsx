@@ -275,18 +275,27 @@ export default function AdsPage() {
     }, 1000);
   }, []);
 
-  // Give reward and record
-  const giveReward = useCallback(async (provider: ProviderWithCount) => {
-    const res = await recordAdWatch(user!.id, provider.id, provider.reward_per_ad);
-    if (res.success) {
-      showReward(provider.reward_per_ad, 'Ad Watched!', `+${provider.reward_per_ad} Hive earned`, '📺');
-      toast.success(`+${provider.reward_per_ad} Hive earned!`, { icon: '🐝' });
-      setProviders(prev => prev.map(p => p.id === provider.id ? { ...p, todayCount: p.todayCount + 1 } : p));
-      await refreshUser();
-    } else {
-      toast.error(res.message);
-    }
+  // Give reward INSTANTLY when ad closes - optimistic UI update
+  const giveReward = useCallback((provider: ProviderWithCount) => {
+    // IMMEDIATE visual feedback - no waiting
+    showReward(provider.reward_per_ad, 'Ad Watched!', `+${provider.reward_per_ad} Hive earned`, '📺');
+    toast.success(`+${provider.reward_per_ad} Hive earned!`, { icon: '🐝' });
+    setProviders(prev => prev.map(p => p.id === provider.id ? { ...p, todayCount: p.todayCount + 1 } : p));
     startCountdown(provider.id, 5);
+
+    // DB operations in background - don't await
+    recordAdWatch(user!.id, provider.id, provider.reward_per_ad).then(res => {
+      if (res.success) {
+        refreshUser(); // non-blocking refresh
+      } else {
+        // Rollback on failure
+        toast.error(res.message);
+        setProviders(prev => prev.map(p => p.id === provider.id ? { ...p, todayCount: Math.max(0, p.todayCount - 1) } : p));
+      }
+    }).catch(() => {
+      toast.error('Failed to record reward');
+      setProviders(prev => prev.map(p => p.id === provider.id ? { ...p, todayCount: Math.max(0, p.todayCount - 1) } : p));
+    });
   }, [user, showReward, refreshUser, startCountdown]);
 
   // Main watch ad handler - no popup, just track actual ad time
@@ -307,19 +316,19 @@ export default function AdsPage() {
       // Start ad and track actual watch time
       const result = await startAdWithTimer(provider);
 
-      // For instant reward providers (Monetag, Gigapub), always give reward
+      // For instant reward providers (Monetag, Gigapub, etc.) - always give reward
       const isInstantReward = minWatchSeconds === 0;
 
-      if (result.opened && (isInstantReward || result.watchTimeSeconds >= minWatchSeconds)) {
-        // Watched enough - give reward immediately
-        await giveReward(provider);
-      } else if (!result.opened) {
-        // Ad never opened
+      // GIVE REWARD if: instant provider OR watched >= minimum required seconds
+      if (isInstantReward || result.watchTimeSeconds >= minWatchSeconds) {
+        giveReward(provider);
+      } else if (!result.opened && result.watchTimeSeconds === 0) {
+        // Ad never opened at all
         setAdErrorMessage('Ad failed to play. Please try again.');
         setShowAdError(true);
         startCountdown(provider.id, 5);
       } else {
-        // Ad opened but closed early
+        // Ad opened but closed before minimum time
         setShowAdClosedEarly(true);
         startCountdown(provider.id, 5);
       }
