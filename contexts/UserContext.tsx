@@ -78,12 +78,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        // Fallback for browser preview (uses admin ID so admin panel is accessible)
+        // Fallback for browser preview (shows as guest, NOT admin)
         if (!tgUser) {
           tgUser = {
-            id: ADMIN_TELEGRAM_ID,
-            username: 'Pandatechnic',
-            first_name: 'PANDA',
+            id: 999999999, // Random ID that's not admin
+            username: 'Guest',
+            first_name: 'Guest',
             last_name: undefined,
             photo_url: undefined,
           };

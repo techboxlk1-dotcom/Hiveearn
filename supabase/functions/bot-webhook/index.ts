@@ -20,8 +20,8 @@ function getMainKeyboard() {
     inline_keyboard: [
       [{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }],
       [
-        { text: "👥 Community", url: `https://t.me/${COMMUNITY_CHANNEL}` },
-        { text: "💳 Payments", url: `https://t.me/${PAYMENT_CHANNEL}` },
+        { text: "👥 Community", url: "https://t.me/hiveearn" },
+        { text: "💳 Payments", url: "https://t.me/hiveearnpayment" },
       ],
     ],
   };

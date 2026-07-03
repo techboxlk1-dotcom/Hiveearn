@@ -6,23 +6,28 @@ export interface AdResult {
   success: boolean;
   watched: boolean;
   clicked: boolean;
-}
-
-export interface RandomAdResult {
-  success: boolean;
-  network: string;
+  watchTimeSeconds: number;
 }
 
 export interface AdCloseResult {
   opened: boolean;
   closed: boolean;
-  watchTimeSeconds: number; // How long the ad was actually visible
+  watchTimeSeconds: number;
 }
+
+// Provider-specific minimum watch times
+const PROVIDER_MIN_TIMES: Record<string, number> = {
+  'adsgram-reward': 31,    // Adsgram Reward - 31+ seconds
+  'adsgram-ai': 16,        // Adsgram AI - 16+ seconds
+  'monetag': 0,            // Monetag - instant
+  'gigapub': 0,            // Gigapub - instant
+  'monetix': 0,            // Monetix - instant
+};
 
 export function useAds() {
   const adsgramReady = useCallback(() => typeof window !== 'undefined' && !!window.Adsgram, []);
 
-  // Auto ad - just shows without complex tracking
+  // Auto ad - just shows without tracking (for home page)
   const showAutoAd = useCallback(async () => {
     if (!adsgramReady()) return;
     try {
@@ -33,63 +38,44 @@ export function useAds() {
     }
   }, [adsgramReady]);
 
-  // Reward ad with proper tracking
-  const showRewardAd = useCallback((): Promise<AdResult> => {
-    return new Promise((resolve) => {
-      if (!adsgramReady()) {
-        resolve({ success: false, watched: false, clicked: false });
-        return;
-      }
-      try {
-        const controller = window.Adsgram!.init({ blockId: '36138' });
-        controller.show()
-          .then((result) => {
-            const done = result.done && !result.error;
-            resolve({ success: done, watched: !result.error, clicked: done });
-          })
-          .catch(() => {
-            resolve({ success: false, watched: false, clicked: false });
-          });
-      } catch {
-        resolve({ success: false, watched: false, clicked: false });
-      }
-    });
-  }, [adsgramReady]);
-
-  // Random network ad
-  const showRandomAd = useCallback(async (): Promise<RandomAdResult> => {
-    const options = ['adsgram', 'monetag', 'gigapub'];
-    const shuffled = [...options].sort(() => Math.random() - 0.5);
-
-    for (const pick of shuffled) {
-      if (pick === 'adsgram' && adsgramReady()) {
-        try {
-          const controller = window.Adsgram!.init({ blockId: 'int-36139' });
-          await controller.show();
-          return { success: true, network: 'adsgram' };
-        } catch { /* try next */ }
-      }
-      if (pick === 'monetag' && typeof window !== 'undefined' && window.show_11196790) {
-        try {
-          window.show_11196790();
-          await new Promise(r => setTimeout(r, 5000));
-          return { success: true, network: 'monetag' };
-        } catch { /* try next */ }
-      }
-      if (pick === 'gigapub' && typeof window !== 'undefined' && window.showGiga) {
-        try {
-          const result = window.showGiga!();
-          if (result && typeof result.then === 'function') {
-            await result;
-          } else {
-            await new Promise(r => setTimeout(r, 5000));
-          }
-          return { success: true, network: 'gigapub' };
-        } catch { /* try next */ }
-      }
+  // Get minimum watch time for provider
+  const getMinWatchTime = useCallback((provider: {
+    block_id?: string | null;
+    network_type?: string | null;
+    slug?: string | null;
+    min_watch_seconds?: number | null;
+  }): number => {
+    // Use database value if set
+    if (provider.min_watch_seconds && provider.min_watch_seconds > 0) {
+      return provider.min_watch_seconds;
     }
-    return { success: false, network: 'none' };
-  }, [adsgramReady]);
+
+    const blockId = provider.block_id ?? '';
+    const slug = provider.slug ?? '';
+
+    // Adsgram Reward (block ID 36138)
+    if (blockId === '36138' || slug === 'adsgram-reward') {
+      return PROVIDER_MIN_TIMES['adsgram-reward'];
+    }
+
+    // Adsgram AI / Interstitial (block ID int-36139)
+    if (blockId === 'int-36139' || slug === 'adsgram-ai' || slug === 'adsgram') {
+      return PROVIDER_MIN_TIMES['adsgram-ai'];
+    }
+
+    // Monetag
+    if (slug === 'monetag' || provider.network_type === 'monetag') {
+      return PROVIDER_MIN_TIMES['monetag'];
+    }
+
+    // Gigapub
+    if (slug === 'gigapub' || provider.network_type === 'gigapub') {
+      return PROVIDER_MIN_TIMES['gigapub'];
+    }
+
+    // Default 15 seconds
+    return 15;
+  }, []);
 
   // Track actual watch time using visibility API
   const startAdWithTimer = useCallback((provider: {
@@ -99,59 +85,57 @@ export function useAds() {
     min_watch_seconds?: number | null;
   }): Promise<AdCloseResult> => {
     return new Promise((resolve) => {
-      const minWatchSeconds = provider.min_watch_seconds || 5;
+      const minWatchSeconds = getMinWatchTime(provider);
+      const isInstantReward = minWatchSeconds === 0;
+
       let resolved = false;
-      let adOpened = false;
       let adStartTime = 0;
       let totalWatchTime = 0;
-      let timerInterval: ReturnType<typeof setInterval> | undefined;
-      let safetyTimer: ReturnType<typeof setTimeout> | undefined;
 
       const cleanup = () => {
-        if (timerInterval) clearInterval(timerInterval);
-        // Visibility listeners keep running to detect when user returns
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+        window.removeEventListener('blur', onBlur);
+        window.removeEventListener('focus', onFocus);
       };
 
       const finish = (result: AdCloseResult) => {
         if (resolved) return;
         resolved = true;
         cleanup();
-        if (safetyTimer) clearTimeout(safetyTimer);
         resolve(result);
+      };
+
+      // Calculate watch time when user returns
+      const calculateWatchTime = () => {
+        if (adStartTime > 0) {
+          totalWatchTime = Math.floor((Date.now() - adStartTime) / 1000);
+        }
+        return totalWatchTime;
       };
 
       // Track when app is hidden/visible
       const onVisibilityChange = () => {
         if (document.visibilityState === 'hidden') {
-          // User left the app (ad opened or switched away)
-          if (!adOpened) {
-            adOpened = true;
-            adStartTime = Date.now();
-          } else {
-            // Pause counting - user left while ad was playing
-          }
+          // User left the app (ad opened)
+          adStartTime = Date.now();
         } else if (document.visibilityState === 'visible') {
-          // User returned to app
-          if (adOpened) {
-            // Ad closed - user came back from ad
-            totalWatchTime = Math.floor((Date.now() - adStartTime) / 1000);
-            finish({ opened: adOpened, closed: true, watchTimeSeconds: totalWatchTime });
-          }
+          // User returned to app (ad closed)
+          const watchTime = calculateWatchTime();
+          finish({ opened: adStartTime > 0, closed: true, watchTimeSeconds: watchTime });
         }
       };
 
-      // Also track blur/focus for web
+      // Also track blur/focus for non-Telegram environments
       const onBlur = () => {
-        if (!adOpened) {
-          adOpened = true;
+        if (adStartTime === 0) {
           adStartTime = Date.now();
         }
       };
 
       const onFocus = () => {
-        if (adOpened) {
-          totalWatchTime = Math.floor((Date.now() - adStartTime) / 1000);
-          finish({ opened: adOpened, closed: true, watchTimeSeconds: totalWatchTime });
+        if (adStartTime > 0) {
+          const watchTime = calculateWatchTime();
+          finish({ opened: true, closed: true, watchTimeSeconds: watchTime });
         }
       };
 
@@ -161,99 +145,145 @@ export function useAds() {
       window.addEventListener('focus', onFocus);
 
       const blockId = provider.block_id ?? '';
+      const slug = provider.slug ?? '';
       const isAdsgram = blockId === '36138' || blockId === 'int-36139' ||
-        (provider.network_type === 'adsgram' && (provider.slug === 'adsgram' || !provider.slug));
-      const isMonetag = provider.network_type === 'monetag' || provider.slug === 'monetag';
-      const isGigapub = provider.network_type === 'gigapub' || provider.slug === 'gigapub';
-      const isMonetix = provider.network_type === 'monetix' || provider.slug === 'monetix';
+        (provider.network_type === 'adsgram') || slug.includes('adsgram');
+      const isMonetag = slug === 'monetag' || provider.network_type === 'monetag';
+      const isGigapub = slug === 'gigapub' || provider.network_type === 'gigapub';
+      const isMonetix = slug === 'monetix' || provider.network_type === 'monetix';
 
-      // Safety timeout for cleanup
-      safetyTimer = setTimeout(() => {
+      // Safety timeout (3 minutes)
+      const safetyTimer = setTimeout(() => {
         if (!resolved) {
-          if (adOpened) {
-            totalWatchTime = Math.floor((Date.now() - adStartTime) / 1000);
-          }
-          finish({ opened: adOpened, closed: true, watchTimeSeconds: totalWatchTime });
+          const watchTime = calculateWatchTime();
+          finish({ opened: adStartTime > 0, closed: true, watchTimeSeconds: watchTime });
         }
-      }, 180000); // 3 minutes max
+      }, 180000);
 
-      // Adsgram has its own promise
+      // Adsgram has its own promise - we track time via visibility
       if (isAdsgram && adsgramReady()) {
         try {
           const bid = blockId === '36138' ? '36138' : 'int-36139';
           const controller = window.Adsgram!.init({ blockId: bid });
           controller.show()
             .then((result) => {
-              // Calculate watch time from when ad opened
-              if (adOpened && adStartTime > 0) {
-                totalWatchTime = Math.floor((Date.now() - adStartTime) / 1000);
+              clearTimeout(safetyTimer);
+              const watchTime = calculateWatchTime();
+              // For instant reward providers (Monetag/Gigapub style), always give reward
+              if (isInstantReward) {
+                finish({ opened: !result.error, closed: true, watchTimeSeconds: watchTime || 1 });
+              } else {
+                finish({ opened: !result.error, closed: true, watchTimeSeconds: watchTime });
               }
-              finish({ opened: !result.error, closed: true, watchTimeSeconds: totalWatchTime });
             })
             .catch(() => {
+              clearTimeout(safetyTimer);
               finish({ opened: false, closed: true, watchTimeSeconds: 0 });
             });
         } catch {
+          clearTimeout(safetyTimer);
           finish({ opened: false, closed: true, watchTimeSeconds: 0 });
         }
         return;
       }
 
-      // Monetag - call the show function
+      // Monetag - instant reward on return
       if (isMonetag && typeof window !== 'undefined' && window.show_11196790) {
         try {
           window.show_11196790();
-          // Will be resolved when user returns (visibility change or focus)
+          // Will resolve via visibility change when user returns
         } catch {
+          clearTimeout(safetyTimer);
           finish({ opened: false, closed: true, watchTimeSeconds: 0 });
         }
         return;
       }
 
-      // Gigapub - call the show function
+      // Gigapub - instant reward on return
       if (isGigapub && typeof window !== 'undefined' && window.showGiga) {
         try {
           const result = window.showGiga();
           if (result && typeof result.then === 'function') {
             result.then(() => {
-              if (adOpened && adStartTime > 0) {
-                totalWatchTime = Math.floor((Date.now() - adStartTime) / 1000);
-              }
-              finish({ opened: adOpened, closed: true, watchTimeSeconds: totalWatchTime });
+              clearTimeout(safetyTimer);
+              const watchTime = calculateWatchTime();
+              finish({ opened: true, closed: true, watchTimeSeconds: watchTime || 1 });
             }).catch(() => {
+              clearTimeout(safetyTimer);
               finish({ opened: false, closed: true, watchTimeSeconds: 0 });
             });
           }
           // If not a promise, wait for visibility/focus events
         } catch {
+          clearTimeout(safetyTimer);
           finish({ opened: false, closed: true, watchTimeSeconds: 0 });
         }
         return;
       }
 
-      // Monetix - use showRewardAd global function
-      if (isMonetix && typeof window !== 'undefined') {
+      // Monetix
+      if (isMonetix && typeof window !== 'undefined' && window.showRewardAd) {
         try {
-          // Monetix ads handle via script in layout
-          // Will resolve via visibility events
-          if (window.showRewardAd) {
-            window.showRewardAd((res: { status: string }) => {
-              if (adOpened && adStartTime > 0) {
-                totalWatchTime = Math.floor((Date.now() - adStartTime) / 1000);
-              }
-              finish({ opened: res.status === 'completed' || res.status === 'closed', closed: true, watchTimeSeconds: totalWatchTime });
-            });
-          }
+          window.showRewardAd((res: { status: string }) => {
+            clearTimeout(safetyTimer);
+            const watchTime = calculateWatchTime();
+            finish({ opened: res.status === 'completed' || res.status === 'closed', closed: true, watchTimeSeconds: watchTime || 1 });
+          });
         } catch {
+          clearTimeout(safetyTimer);
           finish({ opened: false, closed: true, watchTimeSeconds: 0 });
         }
         return;
       }
 
-      // Unknown provider or SDK not available
+      // Unknown provider - instant reward
+      clearTimeout(safetyTimer);
       finish({ opened: false, closed: true, watchTimeSeconds: 0 });
+    });
+  }, [adsgramReady, getMinWatchTime]);
+
+  // Simple reward ad (for backwards compatibility)
+  const showRewardAd = useCallback((): Promise<AdResult> => {
+    return new Promise((resolve) => {
+      if (!adsgramReady()) {
+        resolve({ success: false, watched: false, clicked: false, watchTimeSeconds: 0 });
+        return;
+      }
+      try {
+        const controller = window.Adsgram!.init({ blockId: '36138' });
+        controller.show()
+          .then((result) => {
+            const done = result.done && !result.error;
+            resolve({ success: done, watched: !result.error, clicked: done, watchTimeSeconds: 31 });
+          })
+          .catch(() => {
+            resolve({ success: false, watched: false, clicked: false, watchTimeSeconds: 0 });
+          });
+      } catch {
+        resolve({ success: false, watched: false, clicked: false, watchTimeSeconds: 0 });
+      }
     });
   }, [adsgramReady]);
 
-  return { showAutoAd, showRewardAd, showRandomAd, startAdWithTimer, adsgramReady };
+  // Random network ad - instant reward (for daily bonus)
+  const showRandomAd = useCallback(async (): Promise<{ success: boolean; network: string }> => {
+    // Just show adsgram interstitial
+    if (adsgramReady()) {
+      try {
+        const controller = window.Adsgram!.init({ blockId: 'int-36139' });
+        await controller.show();
+        return { success: true, network: 'adsgram' };
+      } catch { /* ignore */ }
+    }
+    return { success: true, network: 'skipped' }; // Always succeed for daily bonus
+  }, [adsgramReady]);
+
+  return {
+    showAutoAd,
+    showRewardAd,
+    showRandomAd,
+    startAdWithTimer,
+    adsgramReady,
+    getMinWatchTime
+  };
 }

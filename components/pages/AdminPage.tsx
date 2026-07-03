@@ -262,13 +262,38 @@ function AdminUsers({ adminId }: { adminId: string }) {
               <p className="text-white/40 text-[10px]">Total Withdrawn</p>
             </div>
           </div>
-          <div className="pt-2 border-t border-white/[0.06] flex justify-between">
-            <span className="text-white/40 text-xs">Balance Check</span>
-            {activity.balanceMismatch ? (
-              <span className="text-red-400 text-xs font-bold">MISMATCH: Expected {activity.expectedBalance.toFixed(2)}H</span>
-            ) : (
-              <span className="text-green-400 text-xs font-bold">OK ({activity.actualBalance.toFixed(2)}H)</span>
-            )}
+
+          {/* Earnings breakdown */}
+          <div className="pt-2 border-t border-white/[0.06]">
+            <p className="text-white/40 text-[10px] font-semibold uppercase mb-2">Earnings Breakdown</p>
+            <div className="space-y-1 text-xs">
+              <div className="flex justify-between"><span className="text-white/40">Ads</span><span className="text-hive-gold font-bold">+{(activity as any).adEarnings?.toFixed(1) || 0}H</span></div>
+              <div className="flex justify-between"><span className="text-white/40">Tasks</span><span className="text-green-400 font-bold">+{(activity as any).taskEarnings?.toFixed(1) || 0}H</span></div>
+              <div className="flex justify-between"><span className="text-white/40">Daily Bonus</span><span className="text-blue-400 font-bold">+{(activity as any).dailyBonusEarnings?.toFixed(1) || 0}H</span></div>
+              <div className="flex justify-between"><span className="text-white/40">Reward Codes</span><span className="text-purple-400 font-bold">+{(activity as any).rewardCodeEarnings?.toFixed(1) || 0}H</span></div>
+              <div className="flex justify-between"><span className="text-white/40">Website Visits</span><span className="text-cyan-400 font-bold">+{(activity as any).websiteVisitEarnings?.toFixed(1) || 0}H</span></div>
+              <div className="flex justify-between border-t border-white/[0.06] pt-1"><span className="text-white/60 font-semibold">Total Earned</span><span className="text-white font-bold">+{(activity as any).totalCalculatedEarnings?.toFixed(1) || 0}H</span></div>
+              <div className="flex justify-between"><span className="text-white/40">Withdrawn</span><span className="text-red-400 font-bold">-{(activity as any).totalWithdrawnHive?.toFixed(1) || 0}H</span></div>
+            </div>
+          </div>
+
+          {/* Balance check */}
+          <div className="pt-2 border-t border-white/[0.06]">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-white/40 text-xs">Expected Balance</span>
+              <span className="text-hive-gold font-bold">{activity.expectedBalance.toFixed(2)}H</span>
+            </div>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-white/40 text-xs">Actual Balance</span>
+              <span className="text-white font-bold">{activity.actualBalance.toFixed(2)}H</span>
+            </div>
+            <div className="flex justify-center">
+              {activity.balanceMismatch ? (
+                <span className="px-3 py-1 rounded-full bg-red-500/15 text-red-400 text-xs font-bold">MISMATCH DETECTED</span>
+              ) : (
+                <span className="px-3 py-1 rounded-full bg-green-500/15 text-green-400 text-xs font-bold">BALANCE OK</span>
+              )}
+            </div>
           </div>
         </GlassCard>
 

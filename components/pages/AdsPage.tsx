@@ -98,99 +98,17 @@ function AdErrorModal({ message, onRetry, onLater }: { message: string; onRetry:
   );
 }
 
-// ─── Ad Timer Modal - shows countdown while ad is playing ──────────────────────
-function AdTimerModal({
-  seconds,
-  providerName,
-  onExpired,
-}: {
-  seconds: number;
-  providerName: string;
-  onExpired: () => void;
-}) {
-  const [remaining, setRemaining] = useState(seconds);
-  const [adOpened, setAdOpened] = useState(false);
-  const finishedRef = useRef(false);
-
-  // Detect when ad is actually showing by watching for visibility change
-  useEffect(() => {
-    const onVisChange = () => {
-      if (document.visibilityState === 'visible') {
-        // User came back - ad closed
-        setAdOpened(false);
-      } else {
-        // User left - ad opened
-        setAdOpened(true);
-      }
-    };
-    document.addEventListener('visibilitychange', onVisChange);
-    return () => document.removeEventListener('visibilitychange', onVisChange);
-  }, []);
-
-  // Countdown only when ad is showing
-  useEffect(() => {
-    if (!adOpened || remaining <= 0) return;
-
-    const timer = setTimeout(() => {
-      if (!finishedRef.current) {
-        const newRemaining = remaining - 1;
-        setRemaining(newRemaining);
-        if (newRemaining <= 0) {
-          finishedRef.current = true;
-          onExpired();
-        }
-      }
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, [adOpened, remaining, onExpired]);
-
-  const progress = ((seconds - remaining) / seconds) * 100;
-
+// ─── Small inline progress indicator (no popup) ───────────────────────────────────
+function AdProgressIndicator({ providerName }: { providerName: string }) {
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[60] flex items-center justify-center px-4"
-      style={{ background: 'rgba(0,0,0,0.9)', backdropFilter: 'blur(12px)' }}
-    >
+    <div className="flex items-center gap-2 text-hive-gold animate-pulse">
       <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        className="w-full max-w-sm rounded-3xl overflow-hidden text-center p-6"
-        style={{ background: 'rgba(20,20,20,0.98)', border: '1px solid rgba(255,255,255,0.08)' }}
-      >
-        <div className="w-20 h-20 rounded-2xl bg-hive-gold/10 border border-hive-gold/20 flex items-center justify-center mx-auto mb-4">
-          <Timer size={36} className="text-hive-gold" />
-        </div>
-
-        <h3 className="text-white font-black text-lg mb-1">{providerName}</h3>
-        <p className="text-white/40 text-xs mb-4">
-          {adOpened ? 'Watching ad...' : 'Opening ad...'}
-        </p>
-
-        <div className="relative w-32 h-32 mx-auto mb-4">
-          <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-            <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="8" />
-            <circle
-              cx="50" cy="50" r="45" fill="none" stroke="#F5C518" strokeWidth="8"
-              strokeLinecap="round"
-              strokeDasharray={`${progress * 2.83} 283`}
-            />
-          </svg>
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-hive-gold font-black text-4xl">{remaining}</span>
-          </div>
-        </div>
-
-        <p className="text-white/30 text-xs flex items-center justify-center gap-1">
-          <Info size={12} />
-          Keep the ad open until timer ends
-        </p>
-      </motion.div>
-    </motion.div>
+        animate={{ rotate: 360 }}
+        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+        className="w-4 h-4 border-2 border-hive-gold/30 border-t-hive-gold rounded-full"
+      />
+      <span className="text-xs">Watching {providerName}...</span>
+    </div>
   );
 }
 
@@ -279,7 +197,7 @@ function VisitIncompleteModal({ onTryAgain, onLater }: { onTryAgain: () => void;
 export default function AdsPage() {
   const { user, refreshUser } = useUser();
   const { showReward } = useRewardPopup();
-  const { showRewardAd, startAdWithTimer, adsgramReady } = useAds();
+  const { startAdWithTimer, adsgramReady, getMinWatchTime } = useAds();
 
   const [activeTab, setActiveTab] = useState<AdsTab>('watch');
   const [providers, setProviders] = useState<ProviderWithCount[]>([]);
@@ -290,13 +208,6 @@ export default function AdsPage() {
   const [showAdClosedEarly, setShowAdClosedEarly] = useState(false);
   const [adErrorMessage, setAdErrorMessage] = useState('Ad failed to play. Please try again.');
   const [lastWatchedProvider, setLastWatchedProvider] = useState<ProviderWithCount | null>(null);
-
-  // Timer modal state
-  const [showAdTimer, setShowAdTimer] = useState(false);
-  const [adTimerSeconds, setAdTimerSeconds] = useState(5);
-  const [adTimerProvider, setAdTimerProvider] = useState<ProviderWithCount | null>(null);
-  const timerExpiredRef = useRef(false);
-  const adResultRef = useRef<{ opened: boolean; watchTime: number } | null>(null);
 
   // Visit websites state
   const [websites, setWebsites] = useState<VisitWebsite[]>([]);
@@ -378,18 +289,7 @@ export default function AdsPage() {
     startCountdown(provider.id, 5);
   }, [user, showReward, refreshUser, startCountdown]);
 
-  // Handle timer expired - ad watched fully
-  const handleTimerExpired = useCallback(async () => {
-    timerExpiredRef.current = true;
-    setShowAdTimer(false);
-    if (adTimerProvider) {
-      await giveReward(adTimerProvider);
-    }
-    setWatching(null);
-    setAdTimerProvider(null);
-  }, [adTimerProvider, giveReward]);
-
-  // Main watch ad handler
+  // Main watch ad handler - no popup, just track actual ad time
   const handleWatchAd = useCallback(async (provider: ProviderWithCount) => {
     if (!user || watching || countdowns[provider.id] !== undefined) return;
     if (provider.todayCount >= provider.daily_limit) {
@@ -399,55 +299,38 @@ export default function AdsPage() {
 
     setWatching(provider.id);
     setLastWatchedProvider(provider);
-    timerExpiredRef.current = false;
-    adResultRef.current = null;
 
-    const blockId = provider.block_id ?? '';
-    const minWatchSeconds = provider.min_watch_seconds || 5;
-
-    // Start timer modal
-    setAdTimerSeconds(minWatchSeconds);
-    setAdTimerProvider(provider);
-    setShowAdTimer(true);
+    // Get minimum watch time for this provider
+    const minWatchSeconds = getMinWatchTime(provider);
 
     try {
-      // Start ad and get result
+      // Start ad and track actual watch time
       const result = await startAdWithTimer(provider);
-      adResultRef.current = { opened: result.opened, watchTime: result.watchTimeSeconds };
 
-      // If timer already expired (rewards given), don't show errors
-      if (timerExpiredRef.current) {
-        return;
-      }
+      // For instant reward providers (Monetag, Gigapub), always give reward
+      const isInstantReward = minWatchSeconds === 0;
 
-      // Check if actual watch time met minimum requirement
-      if (result.opened && result.watchTimeSeconds >= minWatchSeconds) {
-        // Watched enough - give reward
-        setShowAdTimer(false);
+      if (result.opened && (isInstantReward || result.watchTimeSeconds >= minWatchSeconds)) {
+        // Watched enough - give reward immediately
         await giveReward(provider);
       } else if (!result.opened) {
         // Ad never opened
-        setShowAdTimer(false);
         setAdErrorMessage('Ad failed to play. Please try again.');
         setShowAdError(true);
         startCountdown(provider.id, 5);
       } else {
         // Ad opened but closed early
-        setShowAdTimer(false);
         setShowAdClosedEarly(true);
         startCountdown(provider.id, 5);
       }
     } catch {
-      if (!timerExpiredRef.current) {
-        setShowAdTimer(false);
-        setAdErrorMessage('Something went wrong. Please try again.');
-        setShowAdError(true);
-        startCountdown(provider.id, 5);
-      }
+      setAdErrorMessage('Something went wrong. Please try again.');
+      setShowAdError(true);
+      startCountdown(provider.id, 5);
     } finally {
       setWatching(null);
     }
-  }, [user, watching, countdowns, startAdWithTimer, giveReward, startCountdown]);
+  }, [user, watching, countdowns, startAdWithTimer, giveReward, startCountdown, getMinWatchTime]);
 
   // Visit website handler
   const handleVisitWebsite = useCallback(async (website: VisitWebsite) => {
@@ -677,17 +560,6 @@ export default function AdsPage() {
               })
             )}
           </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Timer modal */}
-      <AnimatePresence>
-        {showAdTimer && adTimerProvider && (
-          <AdTimerModal
-            seconds={adTimerSeconds}
-            providerName={adTimerProvider.name}
-            onExpired={handleTimerExpired}
-          />
         )}
       </AnimatePresence>
 

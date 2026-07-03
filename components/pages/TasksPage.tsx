@@ -7,7 +7,6 @@ import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import { getTasks, getUserTaskCompletions, startTask, verifyTask } from '@/lib/api';
-import { supabase } from '@/lib/supabase';
 import type { Task } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { useRewardPopup } from '@/components/ui/RewardPopup';
@@ -19,32 +18,23 @@ interface TaskWithStatus extends Task {
   completion_status?: 'pending' | 'verified' | 'rejected';
 }
 
-// Task icon component — handles imgbb URLs and direct image URLs
+// Task icon component
 function TaskIcon({ iconUrl, category }: { iconUrl: string | null; category: string }) {
   const [imageError, setImageError] = useState(false);
-
   const fallbackEmoji = category === 'community' ? '👥' : category === 'partner' ? '🤝' : '⭐';
 
   if (!iconUrl || imageError) {
     return <span className="text-xl">{fallbackEmoji}</span>;
   }
 
-  // Normalize imgbb URLs — handle both ibb.co and i.ibb.co formats
   let finalUrl = iconUrl.trim();
-
-  // Convert ibb.co short URLs to direct i.ibb.co format
-  // Example: https://ibb.co/abc123 → https://i.ibb.co/abc123.png
   if (finalUrl.includes('ibb.co')) {
-    // If it's a short URL like https://ibb.co/abc123
     const shortMatch = finalUrl.match(/^https?:\/\/ibb\.co\/([a-zA-Z0-9]+)$/i);
     if (shortMatch) {
       finalUrl = `https://i.ibb.co/${shortMatch[1]}/image.png`;
-    }
-    // If it's already a direct URL but missing the domain prefix
-    else if (finalUrl.includes('//ibb.co/') && !finalUrl.includes('//i.ibb.co')) {
+    } else if (finalUrl.includes('//ibb.co/') && !finalUrl.includes('//i.ibb.co')) {
       finalUrl = finalUrl.replace('//ibb.co/', '//i.ibb.co/');
     }
-    // Ensure it has an extension
     if (!finalUrl.match(/\.(png|jpg|jpeg|gif|webp|PNG|JPG|JPEG|GIF|WEBP)$/i)) {
       finalUrl = finalUrl + '.png';
     }
@@ -58,10 +48,8 @@ function TaskIcon({ iconUrl, category }: { iconUrl: string | null; category: str
       alt="Task icon"
       className="w-full h-full object-cover"
       onError={() => {
-        // Try alternate formats if loading fails
         if (finalUrl.endsWith('.png')) {
           const jpgUrl = finalUrl.replace('.png', '.jpg');
-          // Update src directly via DOM
           const img = document.querySelector(`img[src="${finalUrl}"]`) as HTMLImageElement;
           if (img) img.src = jpgUrl;
           return;
@@ -79,7 +67,6 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<TaskWithStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [verifying, setVerifying] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -95,11 +82,29 @@ export default function TasksPage() {
     });
   }, [user]);
 
-  const filteredTasks = tasks.filter(t => t.category === activeTab);
+  // Sort tasks: pending/not started first, completed last
+  const sortedTasks = useCallback((taskList: TaskWithStatus[]) => {
+    return [...taskList].sort((a, b) => {
+      const aComplete = a.completion_status === 'verified';
+      const bComplete = b.completion_status === 'verified';
+      if (aComplete && !bComplete) return 1;
+      if (!aComplete && bComplete) return -1;
+      return 0;
+    });
+  }, []);
 
-  const handleJoin = useCallback(async (task: TaskWithStatus) => {
+  const filteredTasks = sortedTasks(tasks.filter(t => t.category === activeTab));
+
+  // Start task - just opens the link
+  const handleStart = useCallback(async (task: TaskWithStatus) => {
     if (!user || actionLoading) return;
-    if (task.telegram_link) window.open(task.telegram_link, '_blank');
+
+    // Open the link
+    if (task.telegram_link) {
+      window.open(task.telegram_link, '_blank');
+    }
+
+    // Mark as pending if not already
     if (!task.completion_status) {
       setActionLoading(task.id);
       await startTask(user.id, task.id);
@@ -108,38 +113,16 @@ export default function TasksPage() {
     }
   }, [user, actionLoading]);
 
-  // For channel tasks: verify via Telegram channel membership check
-  // For bot/link tasks: verify on touch (trust verify — user just taps verify after starting)
+  // Verify task - INSTANT REWARD, no actual verification
   const handleVerify = useCallback(async (task: TaskWithStatus) => {
     if (!user || actionLoading) return;
     setActionLoading(task.id);
-    setVerifying(task.id);
 
     try {
-      // For channel tasks, check actual Telegram channel membership
-      if (task.task_type === 'channel' && task.telegram_link) {
-        // Extract channel username from link
-        const channelMatch = task.telegram_link.match(/t\.me\/(?:joinchat\/)?(@?[\w-]+)/);
-        if (channelMatch) {
-          const channel = channelMatch[1].replace('@', '');
-          // Call the check-membership edge function
-          const { data, error } = await supabase.functions.invoke('check-membership', {
-            body: { user_id: user.telegram_id, channel },
-          });
-          if (error || !data?.is_member) {
-            toast.error('You haven\'t joined the channel yet. Please join first, then verify.');
-            setActionLoading(null);
-            setVerifying(null);
-            return;
-          }
-        }
-      }
-
-      // For bot/link tasks: trust verify — just verify on touch
-      // For channel tasks: if membership confirmed above, proceed
+      // Just give reward - trust the user
       const result = await verifyTask(user.id, task.id);
       if (result.success) {
-        toast.success(result.message, { icon: '✅' });
+        toast.success(`+${result.hive} Hive earned!`, { icon: '✅' });
         showReward(result.hive, 'Task Completed!', task.title, '✅');
         setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completion_status: 'verified' } : t));
         await refreshUser();
@@ -147,22 +130,18 @@ export default function TasksPage() {
         toast.error(result.message);
       }
     } catch {
-      toast.error('Verification failed. Please try again.');
+      toast.error('Failed to complete task. Please try again.');
     } finally {
       setActionLoading(null);
-      setVerifying(null);
     }
   }, [user, actionLoading, showReward, refreshUser]);
 
   const tabLabels: Record<TabType, string> = { main: 'Main', partner: 'Partner', community: 'Community' };
 
-  // Support button click handler — opens support chat
   const handleSupportClick = () => {
-    const supportText = encodeURIComponent("Hi, I need help with tasks in Hive Earn Mini App.");
     window.open('https://t.me/hiveearnsupport', '_blank');
   };
 
-  // Get task type icon
   const getTaskTypeIcon = (taskType?: string) => {
     if (taskType === 'bot') return <Bot size={10} />;
     if (taskType === 'link') return <LinkIcon size={10} />;
@@ -276,7 +255,7 @@ export default function TasksPage() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.07 }}
                 >
-                  <GlassCard className={`p-4 ${status === 'verified' ? 'opacity-70' : ''}`} animate={false}>
+                  <GlassCard className={`p-4 ${status === 'verified' ? 'opacity-60' : ''}`} animate={false}>
                     <div className="flex items-start gap-3">
                       <div className="w-12 h-12 rounded-xl bg-white/[0.08] flex items-center justify-center flex-shrink-0 overflow-hidden">
                         <TaskIcon iconUrl={task.icon_url} category={activeTab} />
@@ -322,29 +301,21 @@ export default function TasksPage() {
                                 onClick={() => handleVerify(task)}
                                 disabled={isLoading}
                                 whileTap={{ scale: 0.95 }}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500/20 border border-green-500/30 rounded-xl text-green-400 text-xs font-bold disabled:opacity-50"
+                                className="flex items-center gap-1.5 px-4 py-1.5 btn-hive rounded-xl text-xs font-bold disabled:opacity-50"
                               >
                                 {isLoading ? <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-3 h-3 border border-current/30 border-t-current rounded-full" /> : <CheckCircle size={12} />}
-                                Verify
+                                Claim +{task.reward_amount}H
                               </motion.button>
                             </>
                           ) : (
-                            <>
-                              {task.telegram_link && (
-                                <motion.button
-                                  onClick={() => handleJoin(task)}
-                                  disabled={isLoading}
-                                  whileTap={{ scale: 0.95 }}
-                                  className="flex items-center gap-1.5 px-3 py-1.5 btn-hive rounded-xl text-xs font-bold disabled:opacity-50"
-                                >
-                                  <ExternalLink size={12} /> {task.task_type === 'channel' ? 'Join' : 'Start'}
-                                </motion.button>
-                              )}
-                              <div className="flex items-center gap-1 text-white/30 text-[10px]">
-                                <Clock size={10} />
-                                <span>{task.task_type === 'channel' ? 'Join then verify' : 'Start then verify'}</span>
-                              </div>
-                            </>
+                            <motion.button
+                              onClick={() => handleStart(task)}
+                              disabled={isLoading}
+                              whileTap={{ scale: 0.95 }}
+                              className="flex items-center gap-1.5 px-4 py-1.5 btn-hive rounded-xl text-xs font-bold disabled:opacity-50"
+                            >
+                              <ExternalLink size={12} /> Open & Earn +{task.reward_amount}H
+                            </motion.button>
                           )}
                         </div>
                       </div>

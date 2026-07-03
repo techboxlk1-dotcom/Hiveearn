@@ -770,7 +770,7 @@ export async function setManager(adminId: string, userId: string, isManager: boo
   return { success: true, message: isManager ? 'Manager role granted' : 'Manager role removed' };
 }
 
-// Get detailed user activity for admin
+// Get detailed user activity for admin - comprehensive balance check
 export async function getUserActivity(userId: string) {
   const [
     { data: user },
@@ -779,20 +779,43 @@ export async function getUserActivity(userId: string) {
     { data: withdrawals },
     { data: taskCompletions },
     { data: referrals },
+    { data: dailyClaims },
+    { data: rewardCodeClaims },
+    { data: websiteVisits },
   ] = await Promise.all([
     supabase.from('users').select('*').eq('id', userId).maybeSingle(),
     supabase.from('transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(50),
-    supabase.from('ad_watches').select('*', { count: 'exact' }).eq('user_id', userId).eq('completed', true),
+    supabase.from('ad_watches').select('hive_earned', { count: 'exact' }).eq('user_id', userId).eq('completed', true),
     supabase.from('withdrawals').select('*').eq('user_id', userId),
-    supabase.from('task_completions').select('*').eq('user_id', userId).eq('status', 'verified'),
+    supabase.from('task_completions').select('hive_earned').eq('user_id', userId).eq('status', 'verified'),
     supabase.from('referrals').select('*').eq('referrer_id', userId),
+    supabase.from('daily_bonus_claims').select('hive_earned').eq('user_id', userId),
+    supabase.from('reward_code_claims').select('hive_earned').eq('user_id', userId),
+    supabase.from('website_visits').select('hive_earned').eq('user_id', userId),
   ]);
 
-  const totalEarnedFromTx = (transactions ?? []).filter(t => t.amount > 0).reduce((sum, t) => sum + t.amount, 0);
-  const totalWithdrawnFromWd = (withdrawals ?? []).filter(w => w.status === 'approved').reduce((sum, w) => sum + w.hive_amount, 0);
-  const expectedBalance = totalEarnedFromTx - totalWithdrawnFromWd;
+  // Calculate earnings from all sources
+  const adEarnings = (adWatches ?? []).reduce((sum: number, w) => sum + (w.hive_earned || 0), 0);
+  const taskEarnings = (taskCompletions ?? []).reduce((sum: number, t) => sum + (t.hive_earned || 0), 0);
+  const dailyBonusEarnings = (dailyClaims ?? []).reduce((sum: number, d) => sum + (d.hive_earned || 0), 0);
+  const rewardCodeEarnings = (rewardCodeClaims ?? []).reduce((sum: number, r) => sum + (r.hive_earned || 0), 0);
+  const websiteVisitEarnings = (websiteVisits ?? []).reduce((sum: number, v) => sum + (v.hive_earned || 0), 0);
+
+  // Referral earnings (from unclaimed pool when claimed)
+  const referralEarnings = user?.unclaimed_referral_hive ?? 0;
+
+  // Total earned from all methods
+  const totalCalculatedEarnings = adEarnings + taskEarnings + dailyBonusEarnings + rewardCodeEarnings + websiteVisitEarnings;
+
+  // Withdrawals
+  const totalWithdrawnHive = (withdrawals ?? []).filter(w => w.status === 'approved').reduce((sum, w) => sum + w.hive_amount, 0);
+
+  // Expected balance
+  const expectedBalance = totalCalculatedEarnings - totalWithdrawnHive;
   const actualBalance = user?.hive_balance ?? 0;
-  const balanceMismatch = Math.abs(expectedBalance - actualBalance) > 5;
+
+  // Allow small tolerance for rounding
+  const balanceMismatch = Math.abs(expectedBalance - actualBalance) > 2;
 
   return {
     user,
@@ -803,6 +826,15 @@ export async function getUserActivity(userId: string) {
     totalTasksCompleted: (taskCompletions ?? []).length,
     totalReferrals: (referrals ?? []).length,
     completedReferrals: (referrals ?? []).filter(r => r.status === 'completed').length,
+    // Breakdown
+    adEarnings,
+    taskEarnings,
+    dailyBonusEarnings,
+    rewardCodeEarnings,
+    websiteVisitEarnings,
+    referralEarnings,
+    totalCalculatedEarnings,
+    totalWithdrawnHive,
     expectedBalance,
     actualBalance,
     balanceMismatch,
