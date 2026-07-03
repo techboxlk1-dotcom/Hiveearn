@@ -95,7 +95,7 @@ export default function TasksPage() {
 
   const filteredTasks = sortedTasks(tasks.filter(t => t.category === activeTab));
 
-  // Start task - just opens the link
+  // Start task - opens the link and shows Claim button immediately
   const handleStart = useCallback(async (task: TaskWithStatus) => {
     if (!user || actionLoading) return;
 
@@ -104,12 +104,12 @@ export default function TasksPage() {
       window.open(task.telegram_link, '_blank');
     }
 
-    // Mark as pending if not already
+    // For bot/link tasks: show Claim button instantly (optimistic)
+    // For channel tasks: also show instantly since verification is instant
     if (!task.completion_status) {
-      setActionLoading(task.id);
-      await startTask(user.id, task.id);
       setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completion_status: 'pending' } : t));
-      setActionLoading(null);
+      // DB write in background
+      startTask(user.id, task.id).catch(() => {});
     }
   }, [user, actionLoading]);
 
