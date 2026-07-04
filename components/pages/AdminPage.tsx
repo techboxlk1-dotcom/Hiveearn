@@ -182,7 +182,7 @@ function AdminUsers({ adminId }: { adminId: string }) {
   const [activityUser, setActivityUser] = useState<User | null>(null);
   const [activity, setActivity] = useState<{ user: User | null; transactions: Array<{ id: string; type: string; amount: number; created_at: string; description: string | null }>; totalAds: number; totalWithdrawals: number; totalWithdrawnUsdt: number; totalTasksCompleted: number; totalReferrals: number; completedReferrals: number; expectedBalance: number; actualBalance: number; balanceMismatch: boolean } | null>(null);
 
-  useEffect(() => { getAllUsers(undefined, 30).then(u => { setUsers(u); setLoading(false); }); }, []);
+  useEffect(() => { getAllUsers(undefined, 200).then(u => { setUsers(u); setLoading(false); }); }, []);
 
   const handleSearch = async () => {
     setLoading(true);
@@ -443,7 +443,7 @@ function AdminWithdrawals({ adminId }: { adminId: string }) {
               <div className="flex items-start justify-between mb-2">
                 <div>
                   <p className="text-white/80 text-xs font-semibold">{(wd as unknown as { user: User | null }).user?.first_name ?? 'User'}</p>
-                  <p className="text-white/30 text-[10px] font-mono">{truncateAddress(wd.wallet_address)}</p>
+                  <p className="text-white/30 text-[10px] font-mono break-all">{wd.wallet_address}</p>
                   <p className="text-white/40 text-[10px]">{(wd as { withdraw_id?: string }).withdraw_id ?? 'WD-??????'}</p>
                   <p className="text-white/20 text-[10px]">{timeAgo(wd.created_at)}</p>
                 </div>

@@ -49,6 +49,9 @@ export async function detectAndHandleIpAbuse(userId: string, ipAddress: string):
   if (blocked) { await autoSuspendUser(userId, `IP address ${ipAddress} is blocked`); return; }
   const { data: allIpUsers } = await supabase.from('users').select('id, telegram_id, first_name, is_suspended, is_admin, manually_unsuspended, created_at').eq('ip_address', ipAddress).order('created_at', { ascending: true });
   if (!allIpUsers || allIpUsers.length <= 1) return;
+  // If any account on this IP is an admin, skip fraud detection entirely
+  // (admin's home/work network should not cause legitimate users to be suspended)
+  if (allIpUsers.some(u => u.is_admin)) return;
   const firstUser = allIpUsers[0];
   const duplicateUsers = allIpUsers.slice(1);
   await supabase.from('users').update({ ip_flagged: true }).eq('ip_address', ipAddress);
@@ -732,8 +735,8 @@ export async function getUserReferrals(userId: string): Promise<Referral[]> {
 
 // ─── Admin ───────────────────────────────────────────────────────────────────
 
-export async function getAllUsers(search?: string, limit = 30, offset = 0): Promise<User[]> {
-  let query = supabase.from('users').select('*').order('hive_balance', { ascending: false }).range(offset, offset + limit - 1);
+export async function getAllUsers(search?: string, limit = 100, offset = 0): Promise<User[]> {
+  let query = supabase.from('users').select('*').order('created_at', { ascending: false }).neq('telegram_id', 999999999).range(offset, offset + limit - 1);
   if (search) query = query.or(`username.ilike.%${search}%,first_name.ilike.%${search}%`);
   const { data } = await query;
   return data ?? [];
@@ -884,10 +887,11 @@ export async function approveWithdrawal(adminId: string, withdrawalId: string, t
 
   // Notify payment channel with proper buttons
   const paymentChannel = settings['payment_channel'] ?? 'hiveearnpayment';
+  const userDisplay = user ? `${user.first_name}${(user as { username?: string }).username ? ` (@${(user as { username?: string }).username})` : ''}` : 'User';
   await supabase.functions.invoke('send-bot-message', {
     body: {
       chat_id: `@${paymentChannel}`,
-      text: `✅ <b>Payment Sent</b>\n\nUser: ${user?.first_name ?? 'User'}${(user as { username?: string })?.username ? ` (@${(user as { username?: string }).username})` : ''}\nID: <code>${user?.telegram_id ?? 'Unknown'}</code>\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\n\n🔗 TXID: <code>${txid}</code>`,
+      text: `💸 <b>Payment Sent</b>\n\n👤 <b>User</b> - ${userDisplay}\n💵 <b>Amount</b> - ${wd.hive_amount} H = ${wd.usdt_amount.toFixed(6)} USDT\n💸 <b>Fee</b> - ${wd.fee_amount.toFixed(6)} USDT\n💰 <b>USDT Net</b> - ${wd.net_amount.toFixed(6)} USDT\n✅ <b>Status</b> - Success\n🔗 <b>Tx ID</b> - <code>${txid}</code>`,
       payment_type: 'approved',
       txid: txid
     }
