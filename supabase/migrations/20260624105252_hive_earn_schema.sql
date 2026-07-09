@@ -541,8 +541,8 @@ INSERT INTO app_settings (key, value, description) VALUES
   ('referral_deadline_hours', '48', 'Hours for referral to complete requirements'),
   ('telegram_bot_username', 'Hiveearnbot', 'Telegram bot username'),
   ('mini_app_url', 'https://t.me/Hiveearnbot/play', 'Mini app URL'),
-  ('community_channel', '@hiveearn', 'Community channel username'),
-  ('payment_channel', '@hiveearnpayment', 'Payment channel username')
+  ('community_channel', 'hiveearn', 'Community channel username'),
+  ('payment_channel', 'hiveearnpayment', 'Payment channel username')
 ON CONFLICT (key) DO NOTHING;
 
 -- Seed sample tasks
