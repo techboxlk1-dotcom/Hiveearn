@@ -463,6 +463,74 @@ export async function adminDeleteVisitWebsite(adminId: string, id: string): Prom
   await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'delete_visit_website', target_id: id });
 }
 
+// ─── Mining (Hourly Hive) ─────────────────────────────────────────────────────
+
+const HIVE_PER_HOUR = 20;
+
+export async function startMining(userId: string): Promise<{ success: boolean; message: string; startedAt: string | null }> {
+  const guard = await checkNotSuspended(userId);
+  if (!guard.ok) return { success: false, message: guard.message, startedAt: null };
+
+  const { data: user } = await supabase.from('users').select('mining_started_at').eq('id', userId).maybeSingle();
+  if (user?.mining_started_at) return { success: false, message: 'Mining already active', startedAt: user.mining_started_at };
+
+  const now = new Date().toISOString();
+  await supabase.from('users').update({ mining_started_at: now }).eq('id', userId);
+  return { success: true, message: 'Mining started!', startedAt: now };
+}
+
+export async function claimMining(userId: string): Promise<{ success: boolean; hive: number; message: string; miningStartedAt: string | null }> {
+  const guard = await checkNotSuspended(userId);
+  if (!guard.ok) return { success: false, hive: 0, message: guard.message, miningStartedAt: null };
+
+  const { data: user } = await supabase.from('users').select('mining_started_at, hive_balance').eq('id', userId).maybeSingle();
+  if (!user || !user.mining_started_at) {
+    return { success: false, hive: 0, message: 'Mining not started', miningStartedAt: null };
+  }
+
+  const elapsedMs = Date.now() - new Date(user.mining_started_at).getTime();
+  const elapsedHours = elapsedMs / (1000 * 60 * 60);
+
+  if (elapsedHours < 1) {
+    const minsLeft = Math.ceil(60 - (elapsedMs / (1000 * 60)));
+    return { success: false, hive: 0, message: `Only ${minsLeft} minutes elapsed. Need at least 1 hour to claim.`, miningStartedAt: user.mining_started_at };
+  }
+
+  const hoursToCredit = Math.floor(elapsedHours);
+  const hiveEarned = hoursToCredit * HIVE_PER_HOUR;
+  const remainder = elapsedHours - hoursToCredit;
+  const newStartedAt = new Date(Date.now() - remainder * 60 * 60 * 1000).toISOString();
+
+  await supabase.from('users').update({
+    hive_balance: user.hive_balance + hiveEarned,
+    total_earned: ((user as { total_earned?: number }).total_earned ?? 0) + hiveEarned,
+    mining_started_at: newStartedAt,
+  }).eq('id', userId);
+
+  await supabase.from('transactions').insert({
+    user_id: userId,
+    type: 'reward',
+    amount: hiveEarned,
+    description: `⛏️ Mining reward — ${hoursToCredit}h × ${HIVE_PER_HOUR} Hive`,
+    status: 'completed',
+  });
+
+  await createNotification(userId, 'reward', '⛏️ Mining Reward Claimed!', `You earned ${hiveEarned} 🍯 Hive from mining!`);
+
+  return { success: true, hive: hiveEarned, message: `+${hiveEarned} Hive mined!`, miningStartedAt: newStartedAt };
+}
+
+export async function getMiningStatus(userId: string): Promise<{ isMining: boolean; startedAt: string | null; elapsedHours: number; pendingHive: number }> {
+  const { data: user } = await supabase.from('users').select('mining_started_at').eq('id', userId).maybeSingle();
+  if (!user?.mining_started_at) return { isMining: false, startedAt: null, elapsedHours: 0, pendingHive: 0 };
+
+  const elapsedMs = Date.now() - new Date(user.mining_started_at).getTime();
+  const elapsedHours = elapsedMs / (1000 * 60 * 60);
+  const pendingHive = Math.floor(elapsedHours) * HIVE_PER_HOUR;
+
+  return { isMining: true, startedAt: user.mining_started_at, elapsedHours, pendingHive };
+}
+
 // ─── Tasks ───────────────────────────────────────────────────────────────────
 
 export async function getTasks(category?: string): Promise<Task[]> {

@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle, Clock, ExternalLink, ArrowLeft, MessageCircle, Plus, Bot, Link as LinkIcon } from 'lucide-react';
+import { CheckCircle, Clock, ExternalLink, ArrowLeft, MessageCircle, Plus, Bot, Link as LinkIcon, Smartphone, Timer } from 'lucide-react';
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
@@ -67,6 +67,8 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<TaskWithStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [miniappCountdowns, setMiniappCountdowns] = useState<Record<string, number>>({});
+  const miniappTimers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
 
   useEffect(() => {
     if (!user) return;
@@ -104,12 +106,26 @@ export default function TasksPage() {
       window.open(task.telegram_link, '_blank');
     }
 
-    // For bot/link tasks: show Claim button instantly (optimistic)
-    // For channel tasks: also show instantly since verification is instant
     if (!task.completion_status) {
       setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completion_status: 'pending' } : t));
-      // DB write in background
       startTask(user.id, task.id).catch(() => {});
+
+      // For miniapp tasks: start 5-second countdown before Claim is enabled
+      if (task.task_type === 'miniapp') {
+        if (miniappTimers.current[task.id]) clearInterval(miniappTimers.current[task.id]);
+        setMiniappCountdowns(prev => ({ ...prev, [task.id]: 5 }));
+        let remaining = 5;
+        miniappTimers.current[task.id] = setInterval(() => {
+          remaining--;
+          if (remaining <= 0) {
+            clearInterval(miniappTimers.current[task.id]);
+            delete miniappTimers.current[task.id];
+            setMiniappCountdowns(prev => { const n = { ...prev }; delete n[task.id]; return n; });
+          } else {
+            setMiniappCountdowns(prev => ({ ...prev, [task.id]: remaining }));
+          }
+        }, 1000);
+      }
     }
   }, [user, actionLoading]);
 
@@ -145,12 +161,14 @@ export default function TasksPage() {
   const getTaskTypeIcon = (taskType?: string) => {
     if (taskType === 'bot') return <Bot size={10} />;
     if (taskType === 'link') return <LinkIcon size={10} />;
+    if (taskType === 'miniapp') return <Smartphone size={10} />;
     return null;
   };
 
   const getTaskTypeLabel = (taskType?: string) => {
     if (taskType === 'bot') return 'Bot Task';
     if (taskType === 'link') return 'Link Task';
+    if (taskType === 'miniapp') return 'Mini App';
     return 'Channel Task';
   };
 
@@ -299,12 +317,12 @@ export default function TasksPage() {
                               )}
                               <motion.button
                                 onClick={() => handleVerify(task)}
-                                disabled={isLoading}
+                                disabled={isLoading || (task.task_type === 'miniapp' && miniappCountdowns[task.id] !== undefined)}
                                 whileTap={{ scale: 0.95 }}
                                 className="flex items-center gap-1.5 px-4 py-1.5 btn-hive rounded-xl text-xs font-bold disabled:opacity-50"
                               >
-                                {isLoading ? <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-3 h-3 border border-current/30 border-t-current rounded-full" /> : <CheckCircle size={12} />}
-                                Claim +{task.reward_amount}H
+                                {isLoading ? <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-3 h-3 border border-current/30 border-t-current rounded-full" /> : task.task_type === 'miniapp' && miniappCountdowns[task.id] !== undefined ? <Timer size={12} /> : <CheckCircle size={12} />}
+                                {task.task_type === 'miniapp' && miniappCountdowns[task.id] !== undefined ? `Claim in ${miniappCountdowns[task.id]}s` : `Claim +${task.reward_amount}H`}
                               </motion.button>
                             </>
                           ) : (

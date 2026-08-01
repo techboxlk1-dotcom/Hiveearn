@@ -252,6 +252,72 @@ export function useAds() {
         return;
       }
 
+      // ── Taddy ────────────────────────────────────────────────────────────
+      if (slug === 'taddy' || provider.network_type === 'taddy') {
+        const tracker = trackWatchTime();
+        let resolved = false;
+
+        const finish = (opened: boolean, watched: number) => {
+          if (resolved) return;
+          resolved = true;
+          const w = tracker.stop();
+          resolve({ opened, closed: true, watchTimeSeconds: opened ? Math.max(watched, w) : 0 });
+        };
+
+        try {
+          if (typeof window !== 'undefined' && typeof (window as unknown as { Taddy?: { showAd: (opts: Record<string, unknown>) => Promise<unknown> } }).Taddy !== 'undefined') {
+            tracker.start();
+            const taddy = (window as unknown as { Taddy: { showAd: (opts: Record<string, unknown>) => Promise<unknown> } }).Taddy;
+            taddy.showAd({
+              pubId: '633a828ff467ad548911c3d994f8a1a7',
+              onReward: () => finish(true, minWatchSeconds + 1),
+              onClose: () => finish(true, 0),
+              onError: () => finish(false, 0),
+            }).catch(() => finish(false, 0));
+            // Fallback timeout
+            setTimeout(() => finish(true, 0), (minWatchSeconds + 10) * 1000);
+          } else {
+            finish(false, 0);
+          }
+        } catch {
+          finish(false, 0);
+        }
+        return;
+      }
+
+      // ── TowerAds ──────────────────────────────────────────────────────────
+      if (slug === 'towerads' || provider.network_type === 'towerads') {
+        const tracker = trackWatchTime();
+        let resolved = false;
+
+        const finish = (opened: boolean, watched: number) => {
+          if (resolved) return;
+          resolved = true;
+          const w = tracker.stop();
+          resolve({ opened, closed: true, watchTimeSeconds: opened ? Math.max(watched, w) : 0 });
+        };
+
+        try {
+          if (typeof window !== 'undefined' && typeof (window as unknown as { TowerAds?: new (opts: Record<string, unknown>) => { loadAndShow: () => Promise<void> } }).TowerAds !== 'undefined') {
+            tracker.start();
+            const TowerAdsClass = (window as unknown as { TowerAds: new (opts: Record<string, unknown>) => { loadAndShow: () => Promise<void> } }).TowerAds;
+            const ads = new TowerAdsClass({
+              apiKey: '2bc95b5bc8910b981e62ae629e056cc8',
+              placementId: 'plc_2a9a008268fa8fdc',
+              onRewardEarned: () => finish(true, minWatchSeconds + 1),
+              onError: () => finish(false, 0),
+            });
+            ads.loadAndShow().catch(() => finish(true, 0));
+            setTimeout(() => finish(true, 0), (minWatchSeconds + 10) * 1000);
+          } else {
+            finish(false, 0);
+          }
+        } catch {
+          finish(false, 0);
+        }
+        return;
+      }
+
       // ── Unknown provider — NO instant reward, ad must actually play ────────
       resolve({ opened: false, closed: true, watchTimeSeconds: 0 });
     });

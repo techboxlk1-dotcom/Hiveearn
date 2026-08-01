@@ -35,6 +35,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Script src="https://ad.gigapub.tech/script?id=7069" strategy="afterInteractive" />
         {/* Monetix Ads SDK */}
         <Script src="https://www.monetixads.online/ads.js" data-mxid="MX-BEF52AF7" strategy="afterInteractive" />
+        {/* Taddy Ads SDK */}
+        <Script src="https://sdk.taddy.pro/web/taddy.min.js" data-pub-id="633a828ff467ad548911c3d994f8a1a7" strategy="afterInteractive" />
+        {/* TowerAds SDK */}
+        <Script src="https://uslads.com/sdk/tower-ads-v4.js" strategy="afterInteractive" />
         <UserProvider>
           <LanguageProvider telegramLangCode={typeof window !== 'undefined' ? window.Telegram?.WebApp?.initDataUnsafe?.user?.language_code : undefined}>
             <RewardPopupProvider>

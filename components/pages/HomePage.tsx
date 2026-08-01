@@ -3,12 +3,12 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
-import { Bell, Gift, Trophy, Megaphone, ChevronRight, Wallet, PlayCircle, CheckSquare, Users, Zap, Copy, ExternalLink } from 'lucide-react';
+import { Bell, Gift, Trophy, Megaphone, ChevronRight, Wallet, PlayCircle, CheckSquare, Users, Zap, Copy, ExternalLink, Pickaxe, Timer } from 'lucide-react';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import HiveBalance from '@/components/ui/HiveBalance';
 import { formatHive, hiveToUsdt, formatUsdt, timeAgo } from '@/lib/utils';
-import { getAnnouncements, getUserTransactions } from '@/lib/api';
+import { getAnnouncements, getUserTransactions, startMining, claimMining, getMiningStatus } from '@/lib/api';
 import type { Announcement, Transaction } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { useAds } from '@/hooks/useAds';
@@ -26,14 +26,74 @@ export default function HomePage() {
   const { user, unreadCount } = useUser();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const { showAutoAd } = useAds();
+  const { showAutoAd, startAdWithTimer, getMinWatchTime } = useAds();
   const initialAdShown = useRef(false);
   const earnTouchCount = useRef(0);
+  const [miningStatus, setMiningStatus] = useState<{ isMining: boolean; startedAt: string | null; elapsedHours: number; pendingHive: number }>({ isMining: false, startedAt: null, elapsedHours: 0, pendingHive: 0 });
+  const [miningLoading, setMiningLoading] = useState(false);
+  const [miningTick, setMiningTick] = useState(0);
 
   useEffect(() => {
     getAnnouncements().then(setAnnouncements);
     if (user) getUserTransactions(user.id, undefined, 5).then(setTransactions);
   }, [user]);
+
+  // Load mining status
+  useEffect(() => {
+    if (!user) return;
+    getMiningStatus(user.id).then(setMiningStatus);
+  }, [user]);
+
+  // Tick every second to update mining timer
+  useEffect(() => {
+    if (!miningStatus.isMining) return;
+    const interval = setInterval(() => setMiningTick(t => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, [miningStatus.isMining]);
+
+  const handleStartMining = useCallback(async () => {
+    if (!user || miningLoading) return;
+    setMiningLoading(true);
+    try {
+      // Show AdsGram ad before starting mining
+      const adsgramProvider = { id: 'adsgram', slug: 'adsgram', name: 'AdsGram', reward_per_ad: 0, daily_limit: 999, network_type: 'adsgram' } as const;
+      await startAdWithTimer(adsgramProvider);
+
+      const res = await startMining(user.id);
+      if (res.success) {
+        toast.success('⛏️ Mining started! +20 Hive every hour!');
+        setMiningStatus(await getMiningStatus(user.id));
+      } else {
+        toast.error(res.message);
+      }
+    } catch {
+      toast.error('Failed to start mining');
+    } finally {
+      setMiningLoading(false);
+    }
+  }, [user, miningLoading, startAdWithTimer]);
+
+  const handleClaimMining = useCallback(async () => {
+    if (!user || miningLoading) return;
+    setMiningLoading(true);
+    try {
+      // Show AdsGram ad before claiming
+      const adsgramProvider = { id: 'adsgram', slug: 'adsgram', name: 'AdsGram', reward_per_ad: 0, daily_limit: 999, network_type: 'adsgram' } as const;
+      await startAdWithTimer(adsgramProvider);
+
+      const res = await claimMining(user.id);
+      if (res.success) {
+        toast.success(`+${res.hive} Hive mined!`);
+        setMiningStatus(await getMiningStatus(user.id));
+      } else {
+        toast.error(res.message);
+      }
+    } catch {
+      toast.error('Failed to claim mining');
+    } finally {
+      setMiningLoading(false);
+    }
+  }, [user, miningLoading, startAdWithTimer]);
 
   // Auto-open ad on mini app launch
   useEffect(() => {
@@ -124,6 +184,77 @@ export default function HomePage() {
                 <p className="text-white/70 font-mono text-sm">{user.telegram_id}</p>
               </div>
             </div>
+          </GlassCard>
+        </motion.div>
+
+        {/* Mining Card */}
+        <motion.div variants={item}>
+          <GlassCard className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-10 h-10 rounded-xl bg-hive-gold/10 border border-hive-gold/20 flex items-center justify-center">
+                  <Pickaxe size={18} className="text-hive-gold" />
+                </div>
+                <div>
+                  <p className="text-white font-bold text-sm">Hive Mining</p>
+                  <p className="text-hive-gold text-xs font-semibold">+20 Hive / hour</p>
+                </div>
+              </div>
+              {miningStatus.isMining && (
+                <div className="flex items-center gap-1 px-2 py-1 bg-green-500/15 rounded-full">
+                  <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                  <span className="text-green-400 text-[10px] font-bold">ACTIVE</span>
+                </div>
+              )}
+            </div>
+
+            {miningStatus.isMining ? (
+              <div>
+                <div className="flex items-center justify-between mb-3 p-3 bg-white/[0.04] rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <Timer size={16} className="text-hive-gold" />
+                    <span className="text-white/60 text-xs font-mono">
+                      {(() => {
+                        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+                        miningTick; // trigger re-render
+                        if (!miningStatus.startedAt) return '00:00:00';
+                        const elapsedMs = Date.now() - new Date(miningStatus.startedAt).getTime();
+                        const h = Math.floor(elapsedMs / 3600000);
+                        const m = Math.floor((elapsedMs % 3600000) / 60000);
+                        const s = Math.floor((elapsedMs % 60000) / 1000);
+                        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+                      })()}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-white/40 text-[10px]">Pending</p>
+                    <p className="text-hive-gold font-bold text-sm">{(() => { // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+                      miningTick; return Math.floor((Date.now() - new Date(miningStatus.startedAt!).getTime()) / 3600000) * 20; })()} Hive</p>
+                  </div>
+                </div>
+                <motion.button
+                  onClick={handleClaimMining}
+                  disabled={miningLoading}
+                  whileTap={{ scale: 0.96 }}
+                  className="w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg,#F5C518,#FFB300)', color: '#0A0A0A' }}
+                >
+                  {miningLoading ? <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full" /> : <Pickaxe size={16} />}
+                  {miningLoading ? 'Processing...' : 'Claim Mining Reward'}
+                </motion.button>
+              </div>
+            ) : (
+              <motion.button
+                onClick={handleStartMining}
+                disabled={miningLoading}
+                whileTap={{ scale: 0.96 }}
+                className="w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg,#F5C518,#FFB300)', color: '#0A0A0A' }}
+              >
+                {miningLoading ? <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full" /> : <Pickaxe size={16} />}
+                {miningLoading ? 'Starting...' : 'Start Mining — 20 Hive/hr'}
+              </motion.button>
+            )}
           </GlassCard>
         </motion.div>
 

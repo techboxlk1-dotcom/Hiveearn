@@ -170,7 +170,7 @@ export interface Task {
   sort_order: number;
   is_active: boolean;
   requires_verification: boolean;
-  task_type: 'channel' | 'bot' | 'link';
+  task_type: 'channel' | 'bot' | 'link' | 'miniapp';
   created_at: string;
   updated_at: string;
 }

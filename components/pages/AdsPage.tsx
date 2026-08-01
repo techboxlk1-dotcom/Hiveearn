@@ -372,9 +372,9 @@ export default function AdsPage() {
     setVisitIncomplete(true);
   }, []);
 
-  const providerIcon: Record<string, string> = { adsgram: '🎯', monetag: '💰', gigapub: '📢', monetix: '🎬' };
-  const providerColor: Record<string, string> = { adsgram: 'text-blue-400', monetag: 'text-green-400', gigapub: 'text-yellow-400', monetix: 'text-purple-400' };
-  const providerBg: Record<string, string> = { adsgram: 'from-blue-900/30', monetag: 'from-green-900/30', gigapub: 'from-yellow-900/30', monetix: 'from-purple-900/30' };
+  const providerIcon: Record<string, string> = { adsgram: '🎯', monetag: '💰', gigapub: '📢', monetix: '🎬', taddy: '🐻', towerads: '🗼' };
+  const providerColor: Record<string, string> = { adsgram: 'text-blue-400', monetag: 'text-green-400', gigapub: 'text-yellow-400', monetix: 'text-purple-400', taddy: 'text-orange-400', towerads: 'text-cyan-400' };
+  const providerBg: Record<string, string> = { adsgram: 'from-blue-900/30', monetag: 'from-green-900/30', gigapub: 'from-yellow-900/30', monetix: 'from-purple-900/30', taddy: 'from-orange-900/30', towerads: 'from-cyan-900/30' };
 
   const totalTodayEarnings = providers.reduce((sum, p) => sum + p.todayCount * p.reward_per_ad, 0);
   const totalAvailable = providers.reduce((sum, p) => sum + Math.max(0, p.daily_limit - p.todayCount) * p.reward_per_ad, 0);

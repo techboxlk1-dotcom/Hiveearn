@@ -622,7 +622,7 @@ function AdminTasks({ adminId }: { adminId: string }) {
       telegram_username: form.telegram_username || null,
       icon_url: form.icon_url || null,
       description: form.description || null,
-      task_type: form.task_type as 'channel' | 'bot' | 'link',
+      task_type: form.task_type as 'channel' | 'bot' | 'link' | 'miniapp',
     });
     toast.success('Task updated!');
     setEditingId(null);
@@ -678,6 +678,7 @@ function AdminTasks({ adminId }: { adminId: string }) {
               <option value="channel">Channel (Telegram channel join verification)</option>
               <option value="bot">Bot (Verify on touch after start)</option>
               <option value="link">Link (Verify on touch after start)</option>
+              <option value="miniapp">Mini App (5s countdown before claim)</option>
             </select>
           </div>
           <motion.button whileTap={{ scale: 0.96 }} onClick={() => editingId ? handleUpdate() : handleCreate()} className="w-full py-3 btn-hive rounded-xl font-bold text-sm">
