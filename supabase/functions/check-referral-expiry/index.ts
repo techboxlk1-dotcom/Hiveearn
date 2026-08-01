@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "npm:@supabase/supabase-js@2.58.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -140,6 +141,3 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
-
-// Inline Supabase client for edge functions
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";

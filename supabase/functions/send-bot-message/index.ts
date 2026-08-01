@@ -1,19 +1,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
-/**
- * SEND-BOT-MESSAGE - Telegram Bot Message Sender
- *
- * Handles all outgoing messages from the bot including:
- * - User notifications
- * - Payment confirmations
- * - Admin alerts
- * - Channel posts
- */
-
 const BOT_TOKEN = Deno.env.get("BOT_TOKEN") ?? "8969456125:AAF-7uv-C-ms0ZrSDvWGAA-51IYXS7Lp6iM";
 const MINI_APP_URL = Deno.env.get("MINI_APP_URL") ?? "https://t.me/Hiveearnbot/play";
 const ADMIN_CHAT_ID = Deno.env.get("ADMIN_CHAT_ID") ?? "5419054691";
 const APP_URL = Deno.env.get("APP_URL") ?? "";
+const BANNER_PHOTO = Deno.env.get("BANNER_PHOTO") ?? "";
 const COMMUNITY_CHANNEL = Deno.env.get("COMMUNITY_CHANNEL") ?? "hiveearn";
 const PAYMENT_CHANNEL = Deno.env.get("PAYMENT_CHANNEL") ?? "hiveearnpayment";
 
@@ -23,20 +14,18 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-// Main keyboard: Open App + Community + Payments
 function getMainKeyboard() {
   return {
     inline_keyboard: [
       [{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }],
       [
-        { text: "👥 Community", url: "https://t.me/hiveearn" },
-        { text: "💳 Payments", url: "https://t.me/hiveearnpayment" },
+        { text: "👥 Community", url: `https://t.me/${COMMUNITY_CHANNEL}` },
+        { text: "💳 Payments", url: `https://t.me/${PAYMENT_CHANNEL}` },
       ],
     ],
   };
 }
 
-// Payment approval keyboard with 3 buttons
 function getPaymentKeyboard(txid: string) {
   return {
     inline_keyboard: [
@@ -49,7 +38,6 @@ function getPaymentKeyboard(txid: string) {
   };
 }
 
-// Payment channel post keyboard
 function getPaymentChannelKeyboard(txid: string) {
   return {
     inline_keyboard: [
@@ -59,7 +47,6 @@ function getPaymentChannelKeyboard(txid: string) {
   };
 }
 
-// User payment notification keyboard
 function getUserPaymentKeyboard(txid: string) {
   return {
     inline_keyboard: [
@@ -102,7 +89,6 @@ async function sendPhoto(chatId: string | number, photo: string, caption: string
   });
   const data = await res.json();
 
-  // Fallback to text if photo fails
   if (!data.ok) {
     return sendMessage(chatId, caption, keyboard);
   }
@@ -123,7 +109,6 @@ Deno.serve(async (req: Request) => {
       parse_mode = "HTML",
       include_banner = false,
       photo_url,
-      // Payment specific options
       payment_type,
       txid,
       button_name,
@@ -139,11 +124,9 @@ Deno.serve(async (req: Request) => {
 
     // Handle payment approval messages with special keyboards
     if (payment_type === "approved" && txid) {
-      // User notification
       if (!String(chat_id).startsWith("@")) {
         await sendMessage(chat_id, text, getUserPaymentKeyboard(txid), parse_mode);
       } else {
-        // Payment channel post
         await sendMessage(chat_id, text, getPaymentChannelKeyboard(txid), parse_mode);
       }
       return new Response(JSON.stringify({ ok: true }), {
@@ -163,13 +146,15 @@ Deno.serve(async (req: Request) => {
     }
 
     // If include_banner is true, send photo with banner
-    if (include_banner && (photo_url || APP_URL)) {
-      const photo = photo_url || `${APP_URL}/IMG-20260624-WA0001.jpg`;
-      const keyboard = customKeyboard || (include_app_button ? getMainKeyboard() : undefined);
-      await sendPhoto(chat_id, photo, text, keyboard);
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (include_banner) {
+      const photo = photo_url || BANNER_PHOTO || (APP_URL ? `${APP_URL}/IMG-20260624-WA0001.jpg` : "");
+      if (photo) {
+        const keyboard = customKeyboard || (include_app_button ? getMainKeyboard() : undefined);
+        await sendPhoto(chat_id, photo, text, keyboard);
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
     }
 
     // Regular text message

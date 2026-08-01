@@ -78,15 +78,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        // Fallback for browser preview (shows as guest, NOT admin)
+        // Fallback for browser preview — do NOT create a guest account in the database.
+        // Only real Telegram users should have DB records.
         if (!tgUser) {
-          tgUser = {
-            id: 999999999, // Random ID that's not admin
-            username: 'Guest',
-            first_name: 'Guest',
-            last_name: undefined,
-            photo_url: undefined,
-          };
+          setIsLoading(false);
+          return;
         }
 
         setTelegramUser(tgUser);

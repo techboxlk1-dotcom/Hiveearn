@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "npm:@supabase/supabase-js@2.58.0";
 
 const BOT_TOKEN = Deno.env.get("BOT_TOKEN") ?? "8969456125:AAF-7uv-C-ms0ZrSDvWGAA-51IYXS7Lp6iM";
 const MINI_APP_URL = Deno.env.get("MINI_APP_URL") ?? "https://t.me/Hiveearnbot/play";
@@ -7,6 +8,8 @@ const PAYMENT_CHANNEL = Deno.env.get("PAYMENT_CHANNEL") ?? "hiveearnpayment";
 const ADMIN_CHAT_ID = Deno.env.get("ADMIN_CHAT_ID") ?? "5419054691";
 const BANNER_PHOTO = Deno.env.get("BANNER_PHOTO") ?? "https://t.me/Hiveearnbot/play";
 const APP_URL = Deno.env.get("APP_URL") ?? "";
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -14,20 +17,18 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-// Inline keyboard: Open App + Community + Payment buttons
 function getMainKeyboard() {
   return {
     inline_keyboard: [
       [{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }],
       [
-        { text: "👥 Community", url: "https://t.me/hiveearn" },
-        { text: "💳 Payments", url: "https://t.me/hiveearnpayment" },
+        { text: "👥 Community", url: `https://t.me/${COMMUNITY_CHANNEL}` },
+        { text: "💳 Payments", url: `https://t.me/${PAYMENT_CHANNEL}` },
       ],
     ],
   };
 }
 
-// Keyboard with Open Hive Earn button only (for reminders)
 function getReminderKeyboard() {
   return {
     inline_keyboard: [
@@ -70,7 +71,6 @@ async function tgSendPhoto(chatId: string | number, caption: string, includeAppB
 
   const data = await res.json();
 
-  // If photo fails, fall back to text message
   if (!data.ok) {
     await tgSendMessage(chatId, caption, includeAppButton, customKeyboard);
   }
@@ -121,7 +121,34 @@ async function checkChannelMembership(userId: number, channel: string): Promise<
   }
 }
 
-// Daily reminder messages — varied so users don't get the same message every time
+// Fetch ALL user telegram_ids from the database, paginating through every page.
+// Supabase defaults to 1000 rows per request, so we must loop until exhausted.
+async function getAllUserTelegramIds(): Promise<number[]> {
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return [];
+  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const allIds: number[] = [];
+  const pageSize = 1000;
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("users")
+      .select("telegram_id")
+      .neq("telegram_id", 999999999) // exclude guest accounts
+      .range(offset, offset + pageSize - 1);
+
+    if (error || !data || data.length === 0) break;
+    allIds.push(...data.map(u => u.telegram_id));
+    if (data.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  return allIds;
+}
+
 const reminderMessages = [
   "🐝 <b>Don't forget to earn your Hive today!</b>\n\n📺 Watch ads\n🎁 Claim daily bonus\n✅ Complete tasks\n\nYour Hive balance is waiting! Tap below to open the app.",
   "🍯 <b>Your Hive tokens are waiting!</b>\n\nCome back and earn more Hive by:\n📺 Watching ads\n👥 Referring friends\n🎁 Daily bonus\n\nKeep your streak alive!",
@@ -160,10 +187,8 @@ Deno.serve(async (req: Request) => {
         `Minimum: $0.08 USDT | Network: BSC (BEP20)\n\n` +
         `Tap the button below to open the mini app and start earning! 🚀`;
 
-      // Send welcome with banner photo + community/payment buttons
       await tgSendPhoto(chatId, welcomeText, true);
 
-      // Notify admin
       await tgSendMessage(
         ADMIN_CHAT_ID,
         `👤 <b>New User Started Bot</b>\n\nName: ${firstName}${username ? ` (@${username})` : ""}\nTelegram ID: <code>${userId}</code>${startPayload ? `\nReferral code: <code>${startPayload}</code>` : ""}`,
@@ -192,18 +217,22 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Handle broadcast with photo (called from admin panel)
+    // Handle broadcast with photo — fetch ALL users from DB (not client-supplied list)
     if (update.type === "broadcast_photo") {
-      const { chat_ids, caption, photo_url, button_name, button_url, send_to_channel } = update;
+      const { caption, photo_url, button_name, button_url, send_to_channel } = update;
+
+      // Fetch all user telegram IDs directly from the database
+      const allChatIds = await getAllUserTelegramIds();
+
       let sent = 0, failed = 0;
 
       const keyboard = button_name && button_url
         ? { inline_keyboard: [[{ text: button_name, url: button_url }], [{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }]] }
         : getMainKeyboard();
 
-      // Send to ALL users including suspended (no filtering)
-      for (let i = 0; i < (chat_ids ?? []).length; i += 25) {
-        const batch = chat_ids.slice(i, i + 25);
+      // Send in batches of 25 to respect Telegram rate limits (~30 msg/sec)
+      for (let i = 0; i < allChatIds.length; i += 25) {
+        const batch = allChatIds.slice(i, i + 25);
         await Promise.all(batch.map(async (cid: number) => {
           try {
             const p: Record<string, unknown> = { chat_id: cid, caption, parse_mode: "HTML", reply_markup: keyboard };
@@ -222,10 +251,11 @@ Deno.serve(async (req: Request) => {
             if (d.ok) sent++; else failed++;
           } catch { failed++; }
         }));
-        if (i + 25 < (chat_ids ?? []).length) await new Promise(r => setTimeout(r, 500));
+        // 500ms delay between batches to avoid rate limiting
+        if (i + 25 < allChatIds.length) await new Promise(r => setTimeout(r, 500));
       }
 
-      // Also post to community channel if requested
+      // Post to community channel if requested
       if (send_to_channel) {
         try {
           if (photo_url) {
@@ -236,24 +266,22 @@ Deno.serve(async (req: Request) => {
         } catch { /* ignore channel errors */ }
       }
 
-      return new Response(JSON.stringify({ ok: true, sent, failed }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ ok: true, sent, failed, total: allChatIds.length }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Handle daily reminder (called from edge function or cron)
+    // Handle daily reminder
     if (update.type === "daily_reminder") {
       const { chat_id } = update;
       if (!chat_id) {
         return new Response(JSON.stringify({ error: "chat_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-      // Pick a random message
       const msg = reminderMessages[Math.floor(Math.random() * reminderMessages.length)];
-      // Send with banner photo + Open Hive Earn button
       await tgSendPhoto(chat_id, msg, true, getReminderKeyboard());
 
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Handle broadcast to community channel only (for boicast messages)
+    // Handle broadcast to community channel only
     if (update.type === "broadcast_to_channel") {
       const { caption, photo_url, button_name, button_url } = update;
       try {

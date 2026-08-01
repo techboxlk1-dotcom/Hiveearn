@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
-const BOT_TOKEN = Deno.env.get("BOT_TOKEN") ?? "8969456125:AAFm5CQIhVWpTL6XQDhj-YoVDEojprQWHo4";
+const BOT_TOKEN = Deno.env.get("BOT_TOKEN") ?? "8969456125:AAF-7uv-C-ms0ZrSDvWGAA-51IYXS7Lp6iM";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

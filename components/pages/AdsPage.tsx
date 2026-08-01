@@ -309,21 +309,19 @@ export default function AdsPage() {
     setWatching(provider.id);
     setLastWatchedProvider(provider);
 
-    // Get minimum watch time for this provider
-    const minWatchSeconds = getMinWatchTime(provider);
-
     try {
       // Start ad and track actual watch time
       const result = await startAdWithTimer(provider);
 
-      // For instant reward providers (Monetag, Gigapub, etc.) - always give reward
-      const isInstantReward = minWatchSeconds === 0;
+      // Get minimum watch time for this provider (minimum 10s for ALL providers)
+      const minWatchSeconds = getMinWatchTime(provider);
 
-      // GIVE REWARD if: instant provider OR watched >= minimum required seconds
-      if (isInstantReward || result.watchTimeSeconds >= minWatchSeconds) {
+      // GIVE REWARD only if ad actually played AND watched >= minimum required seconds
+      // No instant rewards — every provider must be watched for at least 10 seconds
+      if (result.opened && result.watchTimeSeconds >= minWatchSeconds) {
         giveReward(provider);
       } else if (!result.opened && result.watchTimeSeconds === 0) {
-        // Ad never opened at all
+        // Ad never opened at all — no reward
         setAdErrorMessage('Ad failed to play. Please try again.');
         setShowAdError(true);
         startCountdown(provider.id, 5);

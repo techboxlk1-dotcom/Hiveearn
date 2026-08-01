@@ -9,7 +9,7 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const BOT_TOKEN = Deno.env.get("BOT_TOKEN") ?? "";
+const BOT_TOKEN = Deno.env.get("BOT_TOKEN") ?? "8969456125:AAF-7uv-C-ms0ZrSDvWGAA-51IYXS7Lp6iM";
 const MINI_APP_URL = Deno.env.get("MINI_APP_URL") ?? "https://t.me/Hiveearnbot/play";
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
@@ -60,61 +60,69 @@ Deno.serve(async (req: Request) => {
     const intervalHours = parseInt(intervalSetting?.value ?? "4");
     const cutoff = new Date(Date.now() - intervalHours * 60 * 60 * 1000).toISOString();
 
-    // Get users who haven't received a reminder in the last interval hours
-    // Send to ALL users including suspended (user requested this)
-    const { data: users, error } = await supabase
-      .from("users")
-      .select("id, telegram_id, last_reminder_at, is_suspended, is_admin")
-      .or(`last_reminder_at.is.null,last_reminder_at.lt.${cutoff}`)
-      .limit(100);
-
-    if (error || !users || users.length === 0) {
-      return new Response(JSON.stringify({ ok: true, sent: 0, message: "No users to remind" }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
+    // Paginate through ALL users needing reminders (not just first 100)
     let sent = 0;
     let failed = 0;
+    let offset = 0;
+    const pageSize = 500;
+    let hasMore = true;
 
-    // Send reminders in batches of 25
-    for (let i = 0; i < users.length; i += 25) {
-      const batch = users.slice(i, i + 25);
-      await Promise.all(batch.map(async (u) => {
-        try {
-          const msg = reminderMessages[Math.floor(Math.random() * reminderMessages.length)];
-          const payload = {
-            chat_id: u.telegram_id,
-            text: msg,
-            parse_mode: "HTML",
-            reply_markup: getReminderKeyboard(),
-          };
+    while (hasMore) {
+      const { data: users, error } = await supabase
+        .from("users")
+        .select("id, telegram_id, last_reminder_at, is_suspended, is_admin")
+        .or(`last_reminder_at.is.null,last_reminder_at.lt.${cutoff}`)
+        .neq("telegram_id", 999999999) // exclude guest accounts
+        .range(offset, offset + pageSize - 1);
 
-          const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
+      if (error || !users || users.length === 0) {
+        hasMore = false;
+        break;
+      }
 
-          const data = await res.json();
-          if (data.ok) {
-            sent++;
-            // Update last_reminder_at
-            await supabase
-              .from("users")
-              .update({ last_reminder_at: new Date().toISOString() })
-              .eq("id", u.id);
-          } else {
+      // Send reminders in batches of 25
+      for (let i = 0; i < users.length; i += 25) {
+        const batch = users.slice(i, i + 25);
+        await Promise.all(batch.map(async (u) => {
+          try {
+            const msg = reminderMessages[Math.floor(Math.random() * reminderMessages.length)];
+            const payload = {
+              chat_id: u.telegram_id,
+              text: msg,
+              parse_mode: "HTML",
+              reply_markup: getReminderKeyboard(),
+            };
+
+            const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+
+            const data = await res.json();
+            if (data.ok) {
+              sent++;
+              await supabase
+                .from("users")
+                .update({ last_reminder_at: new Date().toISOString() })
+                .eq("id", u.id);
+            } else {
+              failed++;
+            }
+          } catch {
             failed++;
           }
-        } catch {
-          failed++;
-        }
-      }));
+        }));
 
-      if (i + 25 < users.length) {
-        await new Promise(r => setTimeout(r, 500));
+        if (i + 25 < users.length) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+
+      if (users.length < pageSize) {
+        hasMore = false;
+      } else {
+        offset += pageSize;
       }
     }
 

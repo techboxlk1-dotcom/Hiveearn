@@ -45,22 +45,72 @@ export async function sendWelcomeMessage(telegramId: number, firstName: string, 
 
 export async function detectAndHandleIpAbuse(userId: string, ipAddress: string): Promise<void> {
   if (!ipAddress || ipAddress === 'unknown') return;
+
+  // Check if IP is explicitly blocked by admin
   const { data: blocked } = await supabase.from('ip_blocks').select('id').eq('ip_address', ipAddress).maybeSingle();
   if (blocked) { await autoSuspendUser(userId, `IP address ${ipAddress} is blocked`); return; }
-  const { data: allIpUsers } = await supabase.from('users').select('id, telegram_id, first_name, is_suspended, is_admin, manually_unsuspended, created_at').eq('ip_address', ipAddress).order('created_at', { ascending: true });
+
+  // Get all accounts on this IP
+  const { data: allIpUsers } = await supabase.from('users')
+    .select('id, telegram_id, first_name, username, is_suspended, is_admin, manually_unsuspended, created_at, device_fingerprint')
+    .eq('ip_address', ipAddress)
+    .order('created_at', { ascending: true });
+
   if (!allIpUsers || allIpUsers.length <= 1) return;
+
   // If any account on this IP is an admin, skip fraud detection entirely
-  // (admin's home/work network should not cause legitimate users to be suspended)
   if (allIpUsers.some(u => u.is_admin)) return;
-  const firstUser = allIpUsers[0];
-  const duplicateUsers = allIpUsers.slice(1);
-  await supabase.from('users').update({ ip_flagged: true }).eq('ip_address', ipAddress);
-  for (const dup of duplicateUsers) {
-    if (dup.is_admin || dup.is_suspended || dup.manually_unsuspended) continue;
-    await autoSuspendUser(dup.id, `Multiple accounts from same IP (${ipAddress}). First account kept.`);
+
+  // Get the current user's device fingerprint for comparison
+  const { data: currentUser } = await supabase.from('users').select('device_fingerprint').eq('id', userId).maybeSingle();
+  const currentDeviceFp = currentUser?.device_fingerprint ?? null;
+
+  // Only flag accounts that share BOTH the same IP AND the same device fingerprint,
+  // OR accounts created within 60 seconds of each other from the same IP (rapid bot pattern).
+  // Different users on the same WiFi/network (different devices) should NOT be suspended.
+  const now = Date.now();
+  const suspiciousUsers: typeof allIpUsers = [];
+
+  for (const u of allIpUsers) {
+    if (u.id === userId) continue;
+    if (u.is_admin || u.is_suspended || u.manually_unsuspended) continue;
+
+    // Same device fingerprint = same physical device = multi-accounting
+    const sameDevice = currentDeviceFp && u.device_fingerprint && currentDeviceFp === u.device_fingerprint;
+
+    // Rapid sequential creation (within 60 seconds) from same IP = likely bot
+    const { data: newUser } = await supabase.from('users').select('created_at').eq('id', userId).maybeSingle();
+    const userCreated = newUser?.created_at ? new Date(newUser.created_at).getTime() : now;
+    const otherCreated = u.created_at ? new Date(u.created_at).getTime() : 0;
+    const timeDiff = Math.abs(userCreated - otherCreated);
+    const rapidCreation = timeDiff < 60_000; // 60 seconds
+
+    if (sameDevice || rapidCreation) {
+      suspiciousUsers.push(u);
+    }
   }
-  await supabase.from('fraud_logs').insert({ user_id: userId, type: 'multiple_accounts', description: `Same IP detected: ${allIpUsers.length} accounts on IP ${ipAddress}. First account (${firstUser.first_name}) kept, ${duplicateUsers.length} suspended.`, ip_address: ipAddress, severity: 'high' });
-  await notifyAdmin(`🚨 <b>Same-IP Accounts Detected</b>\n\nIP: <code>${ipAddress}</code>\nTotal accounts: ${allIpUsers.length}\n\n✅ First account kept: ${firstUser.first_name} (<code>${firstUser.telegram_id}</code>)\n🚫 ${duplicateUsers.length} duplicate account(s) suspended.`);
+
+  if (suspiciousUsers.length === 0) return;
+
+  // Only flag the IP if we found truly suspicious accounts
+  await supabase.from('users').update({ ip_flagged: true }).eq('ip_address', ipAddress);
+
+  for (const dup of suspiciousUsers) {
+    const reason = currentDeviceFp && dup.device_fingerprint === currentDeviceFp
+      ? `Multiple accounts from same device and IP (${ipAddress})`
+      : `Multiple accounts created rapidly from same IP (${ipAddress})`;
+    await autoSuspendUser(dup.id, reason);
+  }
+
+  await supabase.from('fraud_logs').insert({
+    user_id: userId,
+    type: 'multiple_accounts',
+    description: `Suspicious activity on IP ${ipAddress}: ${suspiciousUsers.length} account(s) suspended (same device or rapid creation). ${allIpUsers.length} total accounts on this IP.`,
+    ip_address: ipAddress,
+    severity: 'high'
+  });
+
+  await notifyAdmin(`🚨 <b>Suspicious Same-IP Activity</b>\n\nIP: <code>${ipAddress}</code>\nTotal accounts on IP: ${allIpUsers.length}\nSuspended: ${suspiciousUsers.length} (same device or rapid creation)\n\nOther accounts on this IP were left active (likely different users on shared network).`);
 }
 
 async function autoSuspendUser(userId: string, reason: string): Promise<void> {
@@ -960,16 +1010,13 @@ export async function broadcastMessage(
     sendToChannel?: boolean;
   }
 ): Promise<{ success: boolean; sent: number; failed: number }> {
-  // Send to ALL users including suspended (user requested this)
-  const { data: users } = await supabase.from('users').select('telegram_id');
-  if (!users || users.length === 0) return { success: false, sent: 0, failed: 0 };
-
-  // Use the bot-webhook function which handles batch sending and channel posting
+  // The bot-webhook edge function fetches ALL users directly from the database
+  // (paginating through every page) — no need to pass chat_ids from the client
+  // (client-side Supabase queries are limited to 1000 rows by default)
   try {
     const { data } = await supabase.functions.invoke('bot-webhook', {
       body: {
         type: 'broadcast_photo',
-        chat_ids: users.map(u => u.telegram_id),
         caption: message,
         photo_url: options?.photoUrl ?? null,
         button_name: options?.buttonName ?? null,
