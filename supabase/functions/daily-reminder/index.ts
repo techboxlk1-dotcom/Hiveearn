@@ -9,7 +9,7 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const BOT_TOKEN = Deno.env.get("BOT_TOKEN") ?? "8969456125:AAF-7uv-C-ms0ZrSDvWGAA-51IYXS7Lp6iM";
+const BOT_TOKEN = Deno.env.get("BOT_TOKEN") ?? "";
 const MINI_APP_URL = Deno.env.get("MINI_APP_URL") ?? "https://t.me/Hiveearnbot/play";
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
