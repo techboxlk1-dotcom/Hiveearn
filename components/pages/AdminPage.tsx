@@ -2,17 +2,17 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, DollarSign, CheckSquare, Megaphone, Gift, Shield, BarChart2, Plus, Check, X, Search, Trash2, Eye, ChevronLeft, Send, Tv, Settings, Globe, UserCog, Wrench, Activity, Star, StarOff, Zap, Edit2, Save, MessageCircle } from 'lucide-react';
+import { Users, DollarSign, CheckSquare, Megaphone, Gift, Shield, BarChart2, Plus, Check, X, Search, Trash2, Eye, ChevronLeft, Send, Tv, Settings, Globe, UserCog, Wrench, Activity, Star, StarOff, Zap, Edit2, Save, MessageCircle, Trophy } from 'lucide-react';
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import { supabase } from '@/lib/supabase';
 import type { User, Withdrawal, RewardCode, Task, Announcement, FraudLog, AdminLog } from '@/lib/supabase';
-import { getAllUsers, approveWithdrawal, rejectWithdrawal, autoApproveWithdrawal, createRewardCode, suspendUser, unsuspendUser, createAnnouncement, createTask, updateTask, getAdminStats, blockIp, broadcastMessage, createAdProvider, updateAdProvider, deleteAdProvider, updateAppSetting, getAppSettings, setManager, listUser, unlistUser, getUserActivity } from '@/lib/api';
+import { getAllUsers, approveWithdrawal, rejectWithdrawal, autoApproveWithdrawal, createRewardCode, suspendUser, unsuspendUser, createAnnouncement, createTask, updateTask, getAdminStats, blockIp, broadcastMessage, createAdProvider, updateAdProvider, deleteAdProvider, updateAppSetting, getAppSettings, setManager, listUser, unlistUser, getUserActivity, createGiveaway, endGiveaway, getAllGiveaways, generateMonthlyLeaderboard, sendBotMessage } from '@/lib/api';
 import { formatHive, formatUsdt, hiveToUsdt, timeAgo, truncateAddress } from '@/lib/utils';
 import { toast } from 'sonner';
 
-type AdminSection = 'dashboard' | 'users' | 'withdrawals' | 'reward_codes' | 'tasks' | 'announcements' | 'fraud' | 'logs' | 'broadcast' | 'ads' | 'visit_sites' | 'settings';
+type AdminSection = 'dashboard' | 'users' | 'withdrawals' | 'reward_codes' | 'tasks' | 'announcements' | 'fraud' | 'logs' | 'broadcast' | 'ads' | 'visit_sites' | 'giveaways' | 'leaderboard' | 'settings';
 
 export default function AdminPage() {
   const { user, isAdmin, isManager } = useUser();
@@ -48,6 +48,8 @@ export default function AdminPage() {
     { id: 'broadcast', label: 'Broadcast', icon: Send },
     { id: 'ads', label: 'Ad Providers', icon: Tv },
     { id: 'visit_sites', label: 'Visit Sites', icon: Globe },
+    { id: 'giveaways', label: 'Giveaways', icon: Gift },
+    { id: 'leaderboard', label: 'Leaderboard', icon: Trophy },
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'fraud', label: 'Fraud Logs', icon: Shield },
     { id: 'logs', label: 'Admin Logs', icon: Eye },
@@ -101,6 +103,8 @@ export default function AdminPage() {
             {section === 'broadcast' && <AdminBroadcast adminId={user.id} />}
             {section === 'ads' && <AdminAds adminId={user.id} />}
             {section === 'visit_sites' && <AdminVisitSites adminId={user.id} />}
+            {section === 'giveaways' && <AdminGiveaways adminId={user.id} />}
+            {section === 'leaderboard' && <AdminLeaderboard adminId={user.id} />}
             {section === 'settings' && <AdminSettings adminId={user.id} />}
             {section === 'fraud' && <AdminFraud />}
             {section === 'logs' && <AdminLogs />}
@@ -1419,6 +1423,143 @@ function AdminLogs() {
             {log.target_type && <p className="text-white/30 text-[10px]">{log.target_type}</p>}
           </div>
         ))}
+      </GlassCard>
+    </div>
+  );
+}
+
+// ─── Admin Giveaways ──────────────────────────────────────────────────────────
+
+function AdminGiveaways({ adminId }: { adminId: string }) {
+  const [giveaways, setGiveaways] = useState<Array<{ id: string; title: string; description: string | null; image_url: string | null; fund_baby_hive: number; min_baby_hive: number; max_participants: number | null; participant_count: number; status: string; created_at: string }>>([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ title: '', description: '', image_url: '', fund_baby_hive: '1000', min_baby_hive: '100', max_participants: '' });
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    const data = await getAllGiveaways();
+    setGiveaways(data);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleCreate = async () => {
+    if (!form.title || !form.fund_baby_hive) { toast.error('Title and fund amount required'); return; }
+    setLoading(true);
+    const res = await createGiveaway(adminId, {
+      title: form.title,
+      description: form.description || undefined,
+      image_url: form.image_url || undefined,
+      fund_baby_hive: parseInt(form.fund_baby_hive),
+      min_baby_hive: parseInt(form.min_baby_hive) || 100,
+      max_participants: form.max_participants ? parseInt(form.max_participants) : undefined,
+    });
+    if (res.success) {
+      toast.success('Giveaway created!');
+      setForm({ title: '', description: '', image_url: '', fund_baby_hive: '1000', min_baby_hive: '100', max_participants: '' });
+      setShowCreate(false);
+      await load();
+    } else {
+      toast.error(res.message);
+    }
+    setLoading(false);
+  };
+
+  const handleEnd = async (id: string) => {
+    if (!confirm('End this giveaway and distribute prizes?')) return;
+    setLoading(true);
+    const res = await endGiveaway(adminId, id);
+    if (res.success) {
+      toast.success(`Giveaway ended! ${res.message}`);
+      await load();
+    } else {
+      toast.error(res.message);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-white font-bold text-base">Manage Giveaways</h2>
+        <button onClick={() => setShowCreate(!showCreate)} className="flex items-center gap-1.5 px-3 py-2 btn-hive rounded-xl text-xs font-bold">
+          <Plus size={14} /> {showCreate ? 'Cancel' : 'Create'}
+        </button>
+      </div>
+
+      {showCreate && (
+        <GlassCard className="p-4 space-y-3" animate={false}>
+          <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Giveaway title" className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
+          <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Description (optional)" className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs resize-none" rows={2} />
+          <input value={form.image_url} onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))} placeholder="Image URL (optional)" className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
+          <div className="grid grid-cols-3 gap-2">
+            <input value={form.fund_baby_hive} onChange={e => setForm(f => ({ ...f, fund_baby_hive: e.target.value }))} placeholder="Fund (Hive)" type="number" className="px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
+            <input value={form.min_baby_hive} onChange={e => setForm(f => ({ ...f, min_baby_hive: e.target.value }))} placeholder="Min Baby Hive" type="number" className="px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
+            <input value={form.max_participants} onChange={e => setForm(f => ({ ...f, max_participants: e.target.value }))} placeholder="Max participants" type="number" className="px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
+          </div>
+          <button onClick={handleCreate} disabled={loading} className="w-full py-2.5 btn-hive rounded-xl text-xs font-bold disabled:opacity-50">
+            {loading ? 'Creating...' : 'Create Giveaway'}
+          </button>
+        </GlassCard>
+      )}
+
+      {giveaways.length === 0 ? (
+        <p className="text-white/30 text-sm text-center py-8">No giveaways yet</p>
+      ) : giveaways.map(g => (
+        <GlassCard key={g.id} className="p-4" animate={false}>
+          <div className="flex items-start justify-between mb-2">
+            <div>
+              <h3 className="text-white font-semibold text-sm">{g.title}</h3>
+              {g.description && <p className="text-white/40 text-xs mt-0.5">{g.description}</p>}
+            </div>
+            <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${g.status === 'active' ? 'bg-green-500/15 text-green-400' : g.status === 'distributed' ? 'bg-blue-500/15 text-blue-400' : 'bg-yellow-500/15 text-yellow-400'}`}>
+              {g.status}
+            </span>
+          </div>
+          <div className="flex items-center gap-4 text-xs text-white/40 mb-3">
+            <span>🎁 {g.fund_baby_hive} Hive</span>
+            <span>👥 {g.participant_count}{g.max_participants ? `/${g.max_participants}` : ''} joined</span>
+            <span>🍼 Min {g.min_baby_hive}</span>
+          </div>
+          {g.status === 'active' && (
+            <button onClick={() => handleEnd(g.id)} disabled={loading} className="w-full py-2 bg-red-500/15 text-red-400 rounded-xl text-xs font-bold disabled:opacity-50">
+              End & Distribute
+            </button>
+          )}
+        </GlassCard>
+      ))}
+    </div>
+  );
+}
+
+// ─── Admin Leaderboard ──────────────────────────────────────────────────────────
+
+function AdminLeaderboard({ adminId }: { adminId: string }) {
+  const [loading, setLoading] = useState(false);
+
+  const handleGenerate = async () => {
+    if (!confirm('Generate monthly leaderboard? This will snapshot current top earners and referrers.')) return;
+    setLoading(true);
+    const res = await generateMonthlyLeaderboard(adminId);
+    if (res.success) {
+      toast.success(res.message);
+    } else {
+      toast.error(res.message);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-white font-bold text-base">Monthly Leaderboard Management</h2>
+      <GlassCard className="p-4" animate={false}>
+        <p className="text-white/60 text-xs mb-3">Generate the monthly leaderboard snapshot. Top 10 referrers share 50,000 Hive prize pool. Users must claim their prize from the Leaderboard tab.</p>
+        <button onClick={handleGenerate} disabled={loading} className="w-full py-2.5 btn-hive rounded-xl text-xs font-bold disabled:opacity-50">
+          {loading ? 'Generating...' : 'Generate Monthly Leaderboard'}
+        </button>
+      </GlassCard>
+      <GlassCard className="p-4" animate={false}>
+        <p className="text-white/40 text-xs">After generating, winners will be able to see their rank and claim their prize from the Leaderboard tab in the mini app. A notification will be sent to each winner via the bot.</p>
       </GlassCard>
     </div>
   );

@@ -125,6 +125,7 @@ export default function HomePage() {
     { icon: Zap, label: 'Reward Code', href: '/reward-code', color: 'text-purple-400', bg: 'bg-purple-400/10' },
     { icon: Wallet, label: 'Withdraw', href: '/wallet', color: 'text-blue-400', bg: 'bg-blue-400/10' },
     { icon: Trophy, label: 'Leaderboard', href: '/leaderboard', color: 'text-hive-gold', bg: 'bg-hive-gold/10' },
+    { icon: Gift, label: 'Giveaway', href: '/giveaway', color: 'text-pink-400', bg: 'bg-pink-400/10' },
   ];
 
   const txTypeColor: Record<string, string> = {

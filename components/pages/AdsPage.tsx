@@ -6,7 +6,7 @@ import { ArrowLeft, PlayCircle, CheckCircle, Globe, Clock, ExternalLink, AlertCi
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
-import { getAdProviders, getTodayAdCount, recordAdWatch, getVisitWebsites, getTodayWebsiteVisits, recordWebsiteVisit } from '@/lib/api';
+import { getAdProviders, getTodayAdCount, recordAdWatch, getVisitWebsites, getTodayWebsiteVisits, recordWebsiteVisit, addBabyHive } from '@/lib/api';
 import type { AdProvider } from '@/lib/supabase';
 import type { VisitWebsite } from '@/lib/api';
 import { toast } from 'sonner';
@@ -278,14 +278,15 @@ export default function AdsPage() {
   // Give reward INSTANTLY when ad closes - optimistic UI update
   const giveReward = useCallback((provider: ProviderWithCount) => {
     // IMMEDIATE visual feedback - no waiting
-    showReward(provider.reward_per_ad, 'Ad Watched!', `+${provider.reward_per_ad} Hive earned`, '📺');
-    toast.success(`+${provider.reward_per_ad} Hive earned!`, { icon: '🐝' });
+    showReward(provider.reward_per_ad, 'Ad Watched!', `+${provider.reward_per_ad} Hive + 100 Baby Hive`, '📺');
+    toast.success(`+${provider.reward_per_ad} Hive + 100 🍼 Baby Hive!`, { icon: '🐝' });
     setProviders(prev => prev.map(p => p.id === provider.id ? { ...p, todayCount: p.todayCount + 1 } : p));
     startCountdown(provider.id, 5);
 
     // DB operations in background - don't await
     recordAdWatch(user!.id, provider.id, provider.reward_per_ad).then(res => {
       if (res.success) {
+        addBabyHive(user!.id, 100);
         refreshUser(); // non-blocking refresh
       } else {
         // Rollback on failure

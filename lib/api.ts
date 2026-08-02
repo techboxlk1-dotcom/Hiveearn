@@ -517,6 +517,12 @@ export async function claimMining(userId: string): Promise<{ success: boolean; h
 
   await createNotification(userId, 'reward', '⛏️ Mining Reward Claimed!', `You earned ${hiveEarned} 🍯 Hive from mining!`);
 
+  // Send bot notification to user
+  const { data: userRecord } = await supabase.from('users').select('telegram_id, first_name').eq('id', userId).maybeSingle();
+  if (userRecord) {
+    await sendBotMessage(userRecord.telegram_id, `⛏️ <b>Mining Reward Claimed!</b>\n\n${userRecord.first_name}, you earned <b>${hiveEarned} 🍯 Hive</b> from mining!\n\n⏱️ Mined for: ${hoursToCredit} hour(s)\n💰 Rate: ${HIVE_PER_HOUR} Hive/hour\n\nKeep mining to earn more! 🚀`);
+  }
+
   return { success: true, hive: hiveEarned, message: `+${hiveEarned} Hive mined!`, miningStartedAt: newStartedAt };
 }
 
@@ -567,8 +573,9 @@ export async function verifyTask(userId: string, taskId: string): Promise<{ succ
   const { data: task } = await supabase.from('tasks').select('*').eq('id', taskId).maybeSingle();
   if (!task) return { success: false, hive: 0, message: 'Task not found' };
 
-  // Verify channel membership for tasks that require it
-  if (task.requires_verification && (task.telegram_username || task.telegram_link)) {
+  // Verify channel membership for channel tasks that require it
+  // Mini app and bot/link tasks don't need channel verification
+  if (task.task_type !== 'miniapp' && task.requires_verification && (task.telegram_username || task.telegram_link)) {
     const channelToCheck = task.telegram_username || (task.telegram_link ? task.telegram_link.match(/t\.me\/(?:joinchat\/)?(@?)([a-zA-Z0-9_]+)/)?.[2] : null);
     if (channelToCheck) {
       const { data: user } = await supabase.from('users').select('telegram_id').eq('id', userId).maybeSingle();
@@ -1004,7 +1011,7 @@ export async function approveWithdrawal(adminId: string, withdrawalId: string, t
   }
 
   // Notify payment channel with proper buttons
-  const paymentChannel = settings['payment_channel'] ?? 'hiveearnpayment';
+  const paymentChannel = (settings['payment_channel'] ?? 'hiveearnpayment').replace(/^@/, '');
   const userDisplay = user ? `${user.first_name}${(user as { username?: string }).username ? ` (@${(user as { username?: string }).username})` : ''}` : 'User';
   await supabase.functions.invoke('send-bot-message', {
     body: {
@@ -1162,4 +1169,225 @@ export async function toggleMaintenanceMode(adminId: string, enabled: boolean): 
 export async function getMaintenanceMode(): Promise<boolean> {
   const { data } = await supabase.from('app_settings').select('value').eq('key', 'maintenance_mode').maybeSingle();
   return data?.value === 'true';
+}
+
+// ─── Baby Hive Token ──────────────────────────────────────────────────────────
+
+export async function getBabyHiveBalance(userId: string): Promise<number> {
+  const { data } = await supabase.from('users').select('baby_hive_balance').eq('id', userId).maybeSingle();
+  return data?.baby_hive_balance ?? 0;
+}
+
+export async function addBabyHive(userId: string, amount: number): Promise<void> {
+  const { data } = await supabase.from('users').select('baby_hive_balance').eq('id', userId).maybeSingle();
+  const current = data?.baby_hive_balance ?? 0;
+  await supabase.from('users').update({ baby_hive_balance: current + amount }).eq('id', userId);
+}
+
+// ─── Giveaways ───────────────────────────────────────────────────────────────
+
+export interface Giveaway {
+  id: string;
+  title: string;
+  description: string | null;
+  image_url: string | null;
+  fund_baby_hive: number;
+  min_baby_hive: number;
+  max_participants: number | null;
+  participant_count: number;
+  status: string;
+  created_by: string | null;
+  created_at: string;
+  ended_at: string | null;
+  distributed_at: string | null;
+}
+
+export async function getActiveGiveaways(): Promise<Giveaway[]> {
+  const { data } = await supabase.from('giveaways').select('*').eq('status', 'active').order('created_at', { ascending: false });
+  return data ?? [];
+}
+
+export async function getAllGiveaways(): Promise<Giveaway[]> {
+  const { data } = await supabase.from('giveaways').select('*').order('created_at', { ascending: false });
+  return data ?? [];
+}
+
+export async function createGiveaway(adminId: string, giveaway: {
+  title: string;
+  description?: string;
+  image_url?: string;
+  fund_baby_hive: number;
+  min_baby_hive?: number;
+  max_participants?: number;
+}): Promise<{ success: boolean; message: string }> {
+  const { error } = await supabase.from('giveaways').insert({
+    title: giveaway.title,
+    description: giveaway.description ?? null,
+    image_url: giveaway.image_url ?? null,
+    fund_baby_hive: giveaway.fund_baby_hive,
+    min_baby_hive: giveaway.min_baby_hive ?? 100,
+    max_participants: giveaway.max_participants ?? null,
+    status: 'active',
+    created_by: adminId,
+  });
+  if (error) return { success: false, message: error.message };
+  await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'create_giveaway', new_data: giveaway });
+  return { success: true, message: 'Giveaway created' };
+}
+
+export async function endGiveaway(adminId: string, giveawayId: string): Promise<{ success: boolean; message: string; distributed: number }> {
+  const { data: giveaway } = await supabase.from('giveaways').select('*').eq('id', giveawayId).maybeSingle();
+  if (!giveaway) return { success: false, message: 'Giveaway not found', distributed: 0 };
+  if (giveaway.status !== 'active') return { success: false, message: 'Giveaway already ended', distributed: 0 };
+
+  const { data: participants } = await supabase.from('giveaway_participants').select('*').eq('giveaway_id', giveawayId);
+  if (!participants || participants.length === 0) {
+    await supabase.from('giveaways').update({ status: 'ended', ended_at: new Date().toISOString() }).eq('id', giveawayId);
+    return { success: true, message: 'Giveaway ended with no participants', distributed: 0 };
+  }
+
+  const totalBabyHive = participants.reduce((sum, p) => sum + p.baby_hive_amount, 0);
+  if (totalBabyHive === 0) {
+    await supabase.from('giveaways').update({ status: 'ended', ended_at: new Date().toISOString() }).eq('id', giveawayId);
+    return { success: true, message: 'No Baby Hive contributed', distributed: 0 };
+  }
+
+  const fund = giveaway.fund_baby_hive;
+  let distributed = 0;
+  for (const p of participants) {
+    const share = (p.baby_hive_amount / totalBabyHive) * fund;
+    const hiveWon = Math.floor(share * 100) / 100;
+    await supabase.from('giveaway_participants').update({ hive_won: hiveWon }).eq('id', p.id);
+    await creditHive(p.user_id, hiveWon, 'giveaway', `🎁 Giveaway: ${giveaway.title}`);
+    distributed++;
+
+    const { data: user } = await supabase.from('users').select('telegram_id, first_name, username').eq('id', p.user_id).maybeSingle();
+    if (user) {
+      await sendBotMessage(user.telegram_id, `🎁 <b>Giveaway Win!</b>\n\n${user.first_name}, you won <b>${hiveWon} 🍯 Hive</b> from the giveaway "${giveaway.title}"!\n\nYour Baby Hive contribution: ${p.baby_hive_amount} 🍼\nTotal participants: ${participants.length}\n\nCongratulations! 🎉`);
+    }
+  }
+
+  await supabase.from('giveaways').update({ status: 'distributed', ended_at: new Date().toISOString(), distributed_at: new Date().toISOString() }).eq('id', giveawayId);
+  await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'end_giveaway', new_data: { giveaway_id: giveawayId, distributed } });
+
+  return { success: true, message: `Distributed to ${distributed} users`, distributed };
+}
+
+export async function participateGiveaway(userId: string, giveawayId: string, babyHiveAmount: number): Promise<{ success: boolean; message: string }> {
+  const { data: giveaway } = await supabase.from('giveaways').select('*').eq('id', giveawayId).maybeSingle();
+  if (!giveaway || giveaway.status !== 'active') return { success: false, message: 'Giveaway not active' };
+
+  const { data: user } = await supabase.from('users').select('baby_hive_balance').eq('id', userId).maybeSingle();
+  if (!user || user.baby_hive_balance < babyHiveAmount) return { success: false, message: 'Insufficient Baby Hive balance' };
+  if (babyHiveAmount < giveaway.min_baby_hive) return { success: false, message: `Minimum ${giveaway.min_baby_hive} Baby Hive required` };
+
+  const { data: existing } = await supabase.from('giveaway_participants').select('id').eq('giveaway_id', giveawayId).eq('user_id', userId).maybeSingle();
+  if (existing) return { success: false, message: 'Already participating in this giveaway' };
+
+  if (giveaway.max_participants && giveaway.participant_count >= giveaway.max_participants) {
+    return { success: false, message: 'Giveaway is full' };
+  }
+
+  const { error } = await supabase.from('giveaway_participants').insert({
+    giveaway_id: giveawayId,
+    user_id: userId,
+    baby_hive_amount: babyHiveAmount,
+  });
+  if (error) return { success: false, message: error.message };
+
+  await supabase.from('users').update({ baby_hive_balance: user.baby_hive_balance - babyHiveAmount }).eq('id', userId);
+  await supabase.from('giveaways').update({ participant_count: giveaway.participant_count + 1 }).eq('id', giveawayId);
+
+  if (giveaway.max_participants && giveaway.participant_count + 1 >= giveaway.max_participants) {
+    await endGiveaway(giveaway.created_by ?? '', giveawayId);
+  }
+
+  return { success: true, message: 'Successfully joined giveaway!' };
+}
+
+export async function getGiveawayParticipation(userId: string): Promise<Record<string, boolean>> {
+  const { data } = await supabase.from('giveaway_participants').select('giveaway_id').eq('user_id', userId);
+  const map: Record<string, boolean> = {};
+  (data ?? []).forEach(p => { map[p.giveaway_id] = true; });
+  return map;
+}
+
+// ─── Monthly Leaderboard ──────────────────────────────────────────────────────
+
+export async function getMonthlyLeaderboard(month?: string): Promise<{
+  earners: Array<{ id: string; user: User; rank: number; value: number; prize: number; claimed: boolean }>;
+  referrers: Array<{ id: string; user: User; rank: number; value: number; prize: number; claimed: boolean }>;
+}> {
+  const targetMonth = month ?? new Date().toISOString().slice(0, 7);
+  const { data } = await supabase.from('monthly_leaderboard').select('*').eq('month', targetMonth).order('leaderboard_type').order('rank');
+  if (!data || data.length === 0) return { earners: [], referrers: [] };
+
+  const userIds = Array.from(new Set(data.map(r => r.user_id)));
+  const { data: users } = await supabase.from('users').select('*').in('id', userIds);
+  const userMap: Record<string, User> = {};
+  (users ?? []).forEach(u => { userMap[u.id] = u; });
+
+  const earners: Array<{ id: string; user: User; rank: number; value: number; prize: number; claimed: boolean }> = [];
+  const referrers: Array<{ id: string; user: User; rank: number; value: number; prize: number; claimed: boolean }> = [];
+
+  for (const row of data) {
+    const u = userMap[row.user_id];
+    if (!u) continue;
+    const entry = { id: row.id, user: u, rank: row.rank, value: Number(row.value), prize: Number(row.prize_hive), claimed: row.claimed };
+    if (row.leaderboard_type === 'earners') earners.push(entry);
+    else if (row.leaderboard_type === 'referrers') referrers.push(entry);
+  }
+
+  return { earners, referrers };
+}
+
+export async function claimLeaderboardPrize(userId: string, leaderboardId: string): Promise<{ success: boolean; hive: number; message: string }> {
+  const { data: entry } = await supabase.from('monthly_leaderboard').select('*').eq('id', leaderboardId).eq('user_id', userId).maybeSingle();
+  if (!entry) return { success: false, hive: 0, message: 'Leaderboard entry not found' };
+  if (entry.claimed) return { success: false, hive: 0, message: 'Prize already claimed' };
+
+  await supabase.from('monthly_leaderboard').update({ claimed: true }).eq('id', leaderboardId);
+  await creditHive(userId, Number(entry.prize_hive), 'leaderboard_prize', `🏆 Monthly Leaderboard Prize (Rank #${entry.rank})`);
+
+  const { data: user } = await supabase.from('users').select('telegram_id, first_name').eq('id', userId).maybeSingle();
+  if (user) {
+    await sendBotMessage(user.telegram_id, `🏆 <b>Leaderboard Prize Claimed!</b>\n\n${user.first_name}, you claimed your <b>${entry.prize_hive} 🍯 Hive</b> leaderboard prize!\n\nRank: #${entry.rank}\nMonth: ${entry.month}\n\nKeep earning to climb next month's leaderboard! 🚀`);
+  }
+
+  return { success: true, hive: Number(entry.prize_hive), message: `+${entry.prize_hive} Hive claimed!` };
+}
+
+export async function generateMonthlyLeaderboard(adminId: string): Promise<{ success: boolean; message: string }> {
+  const month = new Date().toISOString().slice(0, 7);
+
+  const { data: earners } = await supabase.from('users').select('id, hive_balance, total_earned').order('total_earned', { ascending: false }).limit(10);
+  const { count: refCount } = await supabase.from('referrals').select('*', { count: 'exact', head: true });
+
+  const { data: referrers } = await supabase.from('referrals').select('referrer_id').in('status', ['completed', 'pending']);
+
+  const refMap: Record<string, number> = {};
+  (referrers ?? []).forEach(r => { refMap[r.referrer_id] = (refMap[r.referrer_id] ?? 0) + 1; });
+  const topReferrers = Object.entries(refMap).sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+  const totalRefPrize = 50000;
+  const refPrizes = topReferrers.length > 0 ? totalRefPrize / topReferrers.length : 0;
+
+  for (let i = 0; i < (earners ?? []).length; i++) {
+    const u = earners![i];
+    await supabase.from('monthly_leaderboard').upsert({
+      month, leaderboard_type: 'earners', user_id: u.id, rank: i + 1,
+      value: u.total_earned ?? 0, prize_hive: 0, claimed: false,
+    }, { onConflict: 'month,leaderboard_type,user_id' });
+  }
+
+  for (let i = 0; i < topReferrers.length; i++) {
+    const [userId, count] = topReferrers[i];
+    await supabase.from('monthly_leaderboard').upsert({
+      month, leaderboard_type: 'referrers', user_id: userId, rank: i + 1,
+      value: count, prize_hive: Math.floor(refPrizes * 100) / 100, claimed: false,
+    }, { onConflict: 'month,leaderboard_type,user_id' });
+  }
+
+  await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'generate_leaderboard', new_data: { month } });
+  return { success: true, message: `Leaderboard generated for ${month}` };
 }

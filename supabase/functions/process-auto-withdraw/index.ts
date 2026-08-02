@@ -276,11 +276,12 @@ async function processSingleWithdrawal(
     }
 
     // Post to payment channel
+    const paymentChannel = (env.PAYMENT_CHANNEL ?? "hiveearnpayment").replace(/^@/, "");
     await fetch(`${supabaseUrl}/functions/v1/send-bot-message`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${supabaseServiceKey}` },
       body: JSON.stringify({
-        chat_id: "@hiveearnpayment",
+        chat_id: `@${paymentChannel}`,
         text: `✅ <b>💸 Payment Sent</b>\n\n👤 User: ${user?.first_name || 'User'}${user?.username ? ` (@${user.username})` : ''}\n🆔 Telegram ID: <code>${user?.telegram_id || 'Unknown'}</code>\n💵 Amount: <b>${wd.net_amount.toFixed(6)} USDT</b>\n\n🔗 <a href="https://bscscan.com/tx/${txid}">View Transaction</a>`,
         payment_type: "approved",
         txid: txid,
