@@ -498,13 +498,11 @@ export async function claimMining(userId: string): Promise<{ success: boolean; h
 
   const hoursToCredit = Math.floor(elapsedHours);
   const hiveEarned = hoursToCredit * HIVE_PER_HOUR;
-  const remainder = elapsedHours - hoursToCredit;
-  const newStartedAt = new Date(Date.now() - remainder * 60 * 60 * 1000).toISOString();
 
   await supabase.from('users').update({
     hive_balance: user.hive_balance + hiveEarned,
     total_earned: ((user as { total_earned?: number }).total_earned ?? 0) + hiveEarned,
-    mining_started_at: newStartedAt,
+    mining_started_at: null,
   }).eq('id', userId);
 
   await supabase.from('transactions').insert({
@@ -523,7 +521,7 @@ export async function claimMining(userId: string): Promise<{ success: boolean; h
     await sendBotMessage(userRecord.telegram_id, `⛏️ <b>Mining Reward Claimed!</b>\n\n${userRecord.first_name}, you earned <b>${hiveEarned} 🍯 Hive</b> from mining!\n\n⏱️ Mined for: ${hoursToCredit} hour(s)\n💰 Rate: ${HIVE_PER_HOUR} Hive/hour\n\nKeep mining to earn more! 🚀`);
   }
 
-  return { success: true, hive: hiveEarned, message: `+${hiveEarned} Hive mined!`, miningStartedAt: newStartedAt };
+  return { success: true, hive: hiveEarned, message: `+${hiveEarned} Hive mined!`, miningStartedAt: null };
 }
 
 export async function getMiningStatus(userId: string): Promise<{ isMining: boolean; startedAt: string | null; elapsedHours: number; pendingHive: number }> {
@@ -533,6 +531,11 @@ export async function getMiningStatus(userId: string): Promise<{ isMining: boole
   const elapsedMs = Date.now() - new Date(user.mining_started_at).getTime();
   const elapsedHours = elapsedMs / (1000 * 60 * 60);
   const pendingHive = Math.floor(elapsedHours) * HIVE_PER_HOUR;
+
+  // Mining stops after 1 hour — user must claim and restart
+  if (elapsedHours >= 1) {
+    return { isMining: false, startedAt: user.mining_started_at, elapsedHours: 1, pendingHive: HIVE_PER_HOUR };
+  }
 
   return { isMining: true, startedAt: user.mining_started_at, elapsedHours, pendingHive };
 }

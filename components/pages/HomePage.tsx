@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
-import { Bell, Gift, Trophy, Megaphone, ChevronRight, Wallet, PlayCircle, CheckSquare, Users, Zap, Copy, ExternalLink, Pickaxe, Timer } from 'lucide-react';
+import { Bell, Gift, Trophy, Megaphone, ChevronRight, Wallet, PlayCircle, CheckSquare, Users, Zap, Copy, ExternalLink, Pickaxe, Timer, CheckCircle2 } from 'lucide-react';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import HiveBalance from '@/components/ui/HiveBalance';
@@ -201,12 +201,17 @@ export default function HomePage() {
                   <p className="text-hive-gold text-xs font-semibold">+20 Hive / hour</p>
                 </div>
               </div>
-              {miningStatus.isMining && (
+              {miningStatus.isMining ? (
                 <div className="flex items-center gap-1 px-2 py-1 bg-green-500/15 rounded-full">
                   <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
                   <span className="text-green-400 text-[10px] font-bold">ACTIVE</span>
                 </div>
-              )}
+              ) : miningStatus.pendingHive > 0 ? (
+                <div className="flex items-center gap-1 px-2 py-1 bg-hive-gold/15 rounded-full">
+                  <span className="w-2 h-2 rounded-full bg-hive-gold" />
+                  <span className="text-hive-gold text-[10px] font-bold">READY</span>
+                </div>
+              ) : null}
             </div>
 
             {miningStatus.isMining ? (
@@ -220,15 +225,16 @@ export default function HomePage() {
                         miningTick; // trigger re-render
                         if (!miningStatus.startedAt) return '00:00:00';
                         const elapsedMs = Date.now() - new Date(miningStatus.startedAt).getTime();
-                        const h = Math.floor(elapsedMs / 3600000);
-                        const m = Math.floor((elapsedMs % 3600000) / 60000);
-                        const s = Math.floor((elapsedMs % 60000) / 1000);
-                        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+                        const remainingMs = 3600000 - elapsedMs;
+                        if (remainingMs <= 0) return '01:00:00';
+                        const m = Math.floor(remainingMs / 60000);
+                        const s = Math.floor((remainingMs % 60000) / 1000);
+                        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
                       })()}
                     </span>
                   </div>
                   <div className="text-right">
-                    <p className="text-white/40 text-[10px]">Pending</p>
+                    <p className="text-white/40 text-[10px]]">Pending</p>
                     <p className="text-hive-gold font-bold text-sm">{(() => { // eslint-disable-next-line @typescript-eslint/no-unused-expressions
                       miningTick; return Math.floor((Date.now() - new Date(miningStatus.startedAt!).getTime()) / 3600000) * 20; })()} Hive</p>
                   </div>
@@ -242,6 +248,26 @@ export default function HomePage() {
                 >
                   {miningLoading ? <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full" /> : <Pickaxe size={16} />}
                   {miningLoading ? 'Processing...' : 'Claim Mining Reward'}
+                </motion.button>
+              </div>
+            ) : miningStatus.pendingHive > 0 ? (
+              <div>
+                <div className="flex items-center justify-between mb-3 p-3 bg-hive-gold/10 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={16} className="text-hive-gold" />
+                    <span className="text-white/60 text-xs font-semibold">Mining complete! Claim your reward.</span>
+                  </div>
+                  <p className="text-hive-gold font-bold text-sm">{miningStatus.pendingHive} Hive</p>
+                </div>
+                <motion.button
+                  onClick={handleClaimMining}
+                  disabled={miningLoading}
+                  whileTap={{ scale: 0.96 }}
+                  className="w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg,#F5C518,#FFB300)', color: '#0A0A0A' }}
+                >
+                  {miningLoading ? <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full" /> : <Pickaxe size={16} />}
+                  {miningLoading ? 'Processing...' : 'Claim 20 Hive'}
                 </motion.button>
               </div>
             ) : (
