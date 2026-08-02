@@ -12,7 +12,7 @@ import { getAllUsers, approveWithdrawal, rejectWithdrawal, autoApproveWithdrawal
 import { formatHive, formatUsdt, hiveToUsdt, timeAgo, truncateAddress } from '@/lib/utils';
 import { toast } from 'sonner';
 
-type AdminSection = 'dashboard' | 'users' | 'withdrawals' | 'reward_codes' | 'tasks' | 'announcements' | 'fraud' | 'logs' | 'broadcast' | 'ads' | 'visit_sites' | 'giveaways' | 'leaderboard' | 'settings';
+type AdminSection = 'dashboard' | 'users' | 'withdrawals' | 'reward_codes' | 'tasks' | 'announcements' | 'fraud' | 'logs' | 'broadcast' | 'ad_messages' | 'ads' | 'visit_sites' | 'giveaways' | 'leaderboard' | 'settings';
 
 export default function AdminPage() {
   const { user, isAdmin, isManager } = useUser();
@@ -46,6 +46,7 @@ export default function AdminPage() {
     { id: 'tasks', label: 'Tasks', icon: CheckSquare },
     { id: 'announcements', label: 'Announcements', icon: Megaphone },
     { id: 'broadcast', label: 'Broadcast', icon: Send },
+    { id: 'ad_messages', label: 'Ad Messages', icon: Megaphone },
     { id: 'ads', label: 'Ad Providers', icon: Tv },
     { id: 'visit_sites', label: 'Visit Sites', icon: Globe },
     { id: 'giveaways', label: 'Giveaways', icon: Gift },
@@ -101,6 +102,7 @@ export default function AdminPage() {
             {section === 'tasks' && <AdminTasks adminId={user.id} />}
             {section === 'announcements' && <AdminAnnouncements adminId={user.id} />}
             {section === 'broadcast' && <AdminBroadcast adminId={user.id} />}
+            {section === 'ad_messages' && <AdminAdMessages adminId={user.id} />}
             {section === 'ads' && <AdminAds adminId={user.id} />}
             {section === 'visit_sites' && <AdminVisitSites adminId={user.id} />}
             {section === 'giveaways' && <AdminGiveaways adminId={user.id} />}
@@ -1038,6 +1040,92 @@ function AdminBroadcast({ adminId }: { adminId: string }) {
         >
           {sending ? 'Sending...' : '📢 Broadcast to All Users'}
         </motion.button>
+        {result && (
+          <div className="flex gap-2">
+            <div className="flex-1 p-2 bg-green-500/10 border border-green-500/20 rounded-lg text-center">
+              <p className="text-green-400 text-lg font-bold">{result.sent}</p>
+              <p className="text-green-400/60 text-[10px]">Sent</p>
+            </div>
+            <div className="flex-1 p-2 bg-red-500/10 border border-red-500/20 rounded-lg text-center">
+              <p className="text-red-400 text-lg font-bold">{result.failed}</p>
+              <p className="text-red-400/60 text-[10px]">Failed</p>
+            </div>
+          </div>
+        )}
+      </GlassCard>
+    </div>
+  );
+}
+
+// ─── Ad Messages (Broadcast to users about ads) ──────────────────────────────
+function AdminAdMessages({ adminId }: { adminId: string }) {
+  const [message, setMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState<{ sent: number; failed: number } | null>(null);
+
+  const handleSend = async () => {
+    if (!message.trim()) { toast.error('Message cannot be empty'); return; }
+    setSending(true);
+    setResult(null);
+    const res = await broadcastMessage(message.trim(), {});
+    if (res.success) {
+      setResult({ sent: res.sent, failed: res.failed });
+      toast.success(`Ad message sent to ${res.sent} users`);
+      setMessage('');
+      await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'ad_message_broadcast', new_data: { message, sent: res.sent } });
+    } else {
+      toast.error('Failed to send ad message');
+    }
+    setSending(false);
+  };
+
+  return (
+    <div className="space-y-3">
+      <GlassCard className="p-4 space-y-3" animate={false}>
+        <div className="flex items-center gap-2">
+          <Megaphone size={16} className="text-hive-gold" />
+          <p className="text-white/60 text-xs font-semibold uppercase tracking-widest">Ad Messages</p>
+        </div>
+        <p className="text-white/30 text-[10px]">Send ad-related messages to all users (e.g. VPN notice, new ad network, etc.).</p>
+
+        <div>
+          <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">Message</label>
+          <textarea
+            value={message}
+            onChange={e => setMessage(e.target.value)}
+            placeholder="e.g. Adsgram AI ads not available? Use a VPN to change your region and try again..."
+            rows={5}
+            className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs placeholder:text-white/20 focus:outline-none focus:border-hive-gold/30 resize-none"
+          />
+        </div>
+
+        {/* Quick templates */}
+        <div className="flex flex-wrap gap-2">
+          {[
+            { label: 'VPN Notice', text: '📡 Adsgram AI ads not available in your region? Use a VPN to change your location and try again. Other ad networks work without VPN.' },
+            { label: 'New Network', text: '🎉 New ad network added! Watch more ads to earn extra Baby Hive for giveaways.' },
+            { label: 'Ad Issue', text: '⚠️ If ads are not playing, please try again in a few minutes. Make sure your internet connection is stable.' },
+          ].map(tpl => (
+            <motion.button
+              key={tpl.label}
+              whileTap={{ scale: 0.96 }}
+              onClick={() => setMessage(tpl.text)}
+              className="px-3 py-1.5 bg-white/[0.06] border border-white/[0.08] rounded-lg text-white/50 text-[10px] font-semibold hover:bg-white/[0.1] transition-colors"
+            >
+              {tpl.label}
+            </motion.button>
+          ))}
+        </div>
+
+        <motion.button
+          whileTap={{ scale: 0.96 }}
+          onClick={handleSend}
+          disabled={sending || !message.trim()}
+          className="w-full py-3 btn-hive rounded-xl font-bold text-sm disabled:opacity-40"
+        >
+          {sending ? 'Sending...' : '📢 Send Ad Message to All Users'}
+        </motion.button>
+
         {result && (
           <div className="flex gap-2">
             <div className="flex-1 p-2 bg-green-500/10 border border-green-500/20 rounded-lg text-center">

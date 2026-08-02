@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Gift, Users, Clock, Baby, Trophy, Sparkles } from 'lucide-react';
+import { ArrowLeft, Gift, Users, Clock, Baby, Trophy, Sparkles, PlayCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import { getActiveGiveaways, participateGiveaway, getGiveawayParticipation, getBabyHiveBalance, type Giveaway } from '@/lib/api';
 import { toast } from 'sonner';
 import { useRewardPopup } from '@/components/ui/RewardPopup';
+import GiveawayAdsSection from './GiveawayAdsSection';
 
 export default function GiveawayPage() {
   const { user, refreshUser } = useUser();
@@ -93,15 +94,20 @@ export default function GiveawayPage() {
             </div>
             <div className="text-right">
               <p className="text-white/30 text-[10px]">Earn 100 per ad</p>
-              <Link href="/ads">
-                <motion.span whileTap={{ scale: 0.95 }} className="inline-block mt-1 px-3 py-1.5 bg-pink-500/15 text-pink-400 text-[10px] font-bold rounded-lg">
-                  Watch Ads →
-                </motion.span>
-              </Link>
+              <p className="text-white/30 text-[10px] mt-1">Watch ads below</p>
             </div>
           </div>
         </GlassCard>
       </motion.div>
+
+      {/* Ads section — earn Baby Hive */}
+      <div className="mb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <PlayCircle size={16} className="text-hive-gold" />
+          <h2 className="text-white font-bold text-sm">Watch Ads to Earn Baby Hive</h2>
+        </div>
+        <GiveawayAdsSection />
+      </div>
 
       {loading ? (
         <div className="space-y-3">
