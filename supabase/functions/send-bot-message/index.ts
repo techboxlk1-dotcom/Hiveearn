@@ -5,8 +5,8 @@ const MINI_APP_URL = Deno.env.get("MINI_APP_URL") ?? "https://t.me/Hiveearnbot/p
 const ADMIN_CHAT_ID = Deno.env.get("ADMIN_CHAT_ID") ?? "5419054691";
 const APP_URL = Deno.env.get("APP_URL") ?? "";
 const BANNER_PHOTO = Deno.env.get("BANNER_PHOTO") ?? "";
-const COMMUNITY_CHANNEL = Deno.env.get("COMMUNITY_CHANNEL") ?? "hiveearn";
-const PAYMENT_CHANNEL = Deno.env.get("PAYMENT_CHANNEL") ?? "hiveearnpayment";
+const COMMUNITY_CHANNEL = "hiveearn";
+const PAYMENT_CHANNEL = "hiveearnpayment";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

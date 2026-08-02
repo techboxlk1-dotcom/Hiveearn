@@ -276,7 +276,7 @@ async function processSingleWithdrawal(
     }
 
     // Post to payment channel
-    const paymentChannel = (env.PAYMENT_CHANNEL ?? "hiveearnpayment").replace(/^@/, "");
+    const paymentChannel = "hiveearnpayment";
     await fetch(`${supabaseUrl}/functions/v1/send-bot-message`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${supabaseServiceKey}` },

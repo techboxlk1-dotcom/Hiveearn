@@ -3,8 +3,8 @@ import { createClient } from "npm:@supabase/supabase-js@2.58.0";
 
 const BOT_TOKEN = Deno.env.get("BOT_TOKEN") ?? "";
 const MINI_APP_URL = Deno.env.get("MINI_APP_URL") ?? "https://t.me/Hiveearnbot/play";
-const COMMUNITY_CHANNEL = Deno.env.get("COMMUNITY_CHANNEL") ?? "hiveearn";
-const PAYMENT_CHANNEL = Deno.env.get("PAYMENT_CHANNEL") ?? "hiveearnpayment";
+const COMMUNITY_CHANNEL = "hiveearn";
+const PAYMENT_CHANNEL = "hiveearnpayment";
 const ADMIN_CHAT_ID = Deno.env.get("ADMIN_CHAT_ID") ?? "5419054691";
 const BANNER_PHOTO = Deno.env.get("BANNER_PHOTO") ?? "https://t.me/Hiveearnbot/play";
 const APP_URL = Deno.env.get("APP_URL") ?? "";
