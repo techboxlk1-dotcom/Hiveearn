@@ -1136,6 +1136,7 @@ export async function createAdProvider(adminId: string, provider: {
   network_type?: string;
   min_watch_seconds?: number;
   sdk_zone?: string;
+  reward_type?: string;
 }): Promise<{ success: boolean; message: string }> {
   const { error } = await supabase.from('ad_providers').insert({
     name: provider.name,
@@ -1149,6 +1150,7 @@ export async function createAdProvider(adminId: string, provider: {
     network_type: provider.network_type ?? 'legacy',
     min_watch_seconds: provider.min_watch_seconds ?? 0,
     sdk_zone: provider.sdk_zone ?? null,
+    reward_type: provider.reward_type ?? 'hive',
     is_active: true,
   });
   if (error) return { success: false, message: error.message };
@@ -1286,7 +1288,7 @@ export async function createGiveaway(adminId: string, giveaway: {
     description: giveaway.description ?? null,
     image_url: giveaway.image_url ?? null,
     fund_baby_hive: giveaway.fund_baby_hive,
-    min_baby_hive: giveaway.min_baby_hive ?? 100,
+    min_baby_hive: giveaway.min_baby_hive ?? 1000,
     max_participants: giveaway.max_participants ?? null,
     winner_count: giveaway.winner_count ?? 10,
     status: 'active',
@@ -1295,6 +1297,49 @@ export async function createGiveaway(adminId: string, giveaway: {
   if (error) return { success: false, message: error.message };
   await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'create_giveaway', new_data: giveaway });
   return { success: true, message: 'Giveaway created' };
+}
+
+export async function updateGiveaway(adminId: string, giveawayId: string, giveaway: {
+  title?: string;
+  description?: string;
+  image_url?: string;
+  fund_baby_hive?: number;
+  min_baby_hive?: number;
+  max_participants?: number;
+  winner_count?: number;
+}): Promise<{ success: boolean; message: string }> {
+  const updates: Record<string, unknown> = {};
+  if (giveaway.title !== undefined) updates.title = giveaway.title;
+  if (giveaway.description !== undefined) updates.description = giveaway.description || null;
+  if (giveaway.image_url !== undefined) updates.image_url = giveaway.image_url || null;
+  if (giveaway.fund_baby_hive !== undefined) updates.fund_baby_hive = giveaway.fund_baby_hive;
+  if (giveaway.min_baby_hive !== undefined) updates.min_baby_hive = giveaway.min_baby_hive;
+  if (giveaway.max_participants !== undefined) updates.max_participants = giveaway.max_participants || null;
+  if (giveaway.winner_count !== undefined) updates.winner_count = giveaway.winner_count;
+
+  const { error } = await supabase.from('giveaways').update(updates).eq('id', giveawayId);
+  if (error) return { success: false, message: error.message };
+  await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'update_giveaway', target_id: giveawayId, new_data: giveaway });
+  return { success: true, message: 'Giveaway updated' };
+}
+
+export async function uploadToImgbb(file: File): Promise<{ success: boolean; url: string; message: string }> {
+  const IMGBB_API_KEY = process.env.NEXT_PUBLIC_IMGBB_API_KEY;
+  if (!IMGBB_API_KEY) return { success: false, url: '', message: 'ImgBB API key not configured' };
+
+  try {
+    const formData = new FormData();
+    formData.append('image', file);
+    const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await res.json();
+    if (data.success) return { success: true, url: data.data.url, message: 'Image uploaded' };
+    return { success: false, url: '', message: data.error?.message ?? 'Upload failed' };
+  } catch (err) {
+    return { success: false, url: '', message: String(err) };
+  }
 }
 
 export async function endGiveaway(adminId: string, giveawayId: string): Promise<{ success: boolean; message: string; distributed: number }> {

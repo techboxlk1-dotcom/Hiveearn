@@ -2,13 +2,13 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, DollarSign, CheckSquare, Megaphone, Gift, Shield, BarChart2, Plus, Check, X, Search, Trash2, Eye, ChevronLeft, Send, Tv, Settings, Globe, UserCog, Wrench, Activity, Star, StarOff, Zap, Edit2, Save, MessageCircle, Trophy } from 'lucide-react';
+import { Users, DollarSign, CheckSquare, Megaphone, Gift, Shield, BarChart2, Plus, Check, X, Search, Trash2, Eye, ChevronLeft, Send, Tv, Settings, Globe, UserCog, Wrench, Activity, Star, StarOff, Zap, Edit2, Save, MessageCircle, Trophy, Upload } from 'lucide-react';
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import { supabase } from '@/lib/supabase';
 import type { User, Withdrawal, RewardCode, Task, Announcement, FraudLog, AdminLog } from '@/lib/supabase';
-import { getAllUsers, approveWithdrawal, rejectWithdrawal, autoApproveWithdrawal, createRewardCode, suspendUser, unsuspendUser, createAnnouncement, createTask, updateTask, getAdminStats, blockIp, broadcastMessage, createAdProvider, updateAdProvider, deleteAdProvider, updateAppSetting, getAppSettings, setManager, listUser, unlistUser, getUserActivity, createGiveaway, endGiveaway, getAllGiveaways, generateMonthlyLeaderboard, sendBotMessage } from '@/lib/api';
+import { getAllUsers, approveWithdrawal, rejectWithdrawal, autoApproveWithdrawal, createRewardCode, suspendUser, unsuspendUser, createAnnouncement, createTask, updateTask, getAdminStats, blockIp, broadcastMessage, createAdProvider, updateAdProvider, deleteAdProvider, updateAppSetting, getAppSettings, setManager, listUser, unlistUser, getUserActivity, createGiveaway, updateGiveaway, endGiveaway, getAllGiveaways, generateMonthlyLeaderboard, sendBotMessage, uploadToImgbb } from '@/lib/api';
 import { formatHive, formatUsdt, hiveToUsdt, timeAgo, truncateAddress } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -1164,12 +1164,9 @@ function AdminAds({ adminId }: { adminId: string }) {
       network_type: form.network_type || 'interstitial',
       min_watch_seconds: parseInt(form.min_watch_seconds) || 15,
       sdk_zone: form.sdk_zone || undefined,
+      reward_type: form.reward_type,
     });
     if (res.success) {
-      // Set reward_type after creation
-      if (form.reward_type === 'baby_hive') {
-        await supabase.from('ad_providers').update({ reward_type: 'baby_hive' }).eq('name', form.name);
-      }
       toast.success('Ad provider created');
       setShowForm(false);
       setForm({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '', reward_type: 'hive' });
@@ -1550,8 +1547,10 @@ function AdminLogs() {
 function AdminGiveaways({ adminId }: { adminId: string }) {
   const [giveaways, setGiveaways] = useState<Array<{ id: string; title: string; description: string | null; image_url: string | null; fund_baby_hive: number; min_baby_hive: number; max_participants: number | null; participant_count: number; winner_count: number; status: string; created_at: string }>>([]);
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ title: '', description: '', image_url: '', fund_baby_hive: '1000', min_baby_hive: '100', max_participants: '', winner_count: '10' });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState({ title: '', description: '', image_url: '', fund_baby_hive: '1000', min_baby_hive: '1000', max_participants: '', winner_count: '10' });
   const [loading, setLoading] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   const load = async () => {
     const data = await getAllGiveaways();
@@ -1559,6 +1558,26 @@ function AdminGiveaways({ adminId }: { adminId: string }) {
   };
 
   useEffect(() => { load(); }, []);
+
+  const resetForm = () => {
+    setForm({ title: '', description: '', image_url: '', fund_baby_hive: '1000', min_baby_hive: '1000', max_participants: '', winner_count: '10' });
+    setEditingId(null);
+    setShowCreate(false);
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingImage(true);
+    const res = await uploadToImgbb(file);
+    if (res.success) {
+      setForm(f => ({ ...f, image_url: res.url }));
+      toast.success('Image uploaded!');
+    } else {
+      toast.error(res.message);
+    }
+    setUploadingImage(false);
+  };
 
   const handleCreate = async () => {
     if (!form.title || !form.fund_baby_hive) { toast.error('Title and fund amount required'); return; }
@@ -1568,14 +1587,49 @@ function AdminGiveaways({ adminId }: { adminId: string }) {
       description: form.description || undefined,
       image_url: form.image_url || undefined,
       fund_baby_hive: parseInt(form.fund_baby_hive),
-      min_baby_hive: parseInt(form.min_baby_hive) || 100,
+      min_baby_hive: parseInt(form.min_baby_hive) || 1000,
       max_participants: form.max_participants ? parseInt(form.max_participants) : undefined,
       winner_count: parseInt(form.winner_count) || 10,
     });
     if (res.success) {
       toast.success('Giveaway created!');
-      setForm({ title: '', description: '', image_url: '', fund_baby_hive: '1000', min_baby_hive: '100', max_participants: '', winner_count: '10' });
-      setShowCreate(false);
+      resetForm();
+      await load();
+    } else {
+      toast.error(res.message);
+    }
+    setLoading(false);
+  };
+
+  const handleEdit = (g: typeof giveaways[0]) => {
+    setEditingId(g.id);
+    setShowCreate(true);
+    setForm({
+      title: g.title,
+      description: g.description ?? '',
+      image_url: g.image_url ?? '',
+      fund_baby_hive: String(g.fund_baby_hive),
+      min_baby_hive: String(g.min_baby_hive),
+      max_participants: g.max_participants ? String(g.max_participants) : '',
+      winner_count: String(g.winner_count ?? 10),
+    });
+  };
+
+  const handleUpdate = async () => {
+    if (!editingId) return;
+    setLoading(true);
+    const res = await updateGiveaway(adminId, editingId, {
+      title: form.title,
+      description: form.description || undefined,
+      image_url: form.image_url || undefined,
+      fund_baby_hive: parseInt(form.fund_baby_hive),
+      min_baby_hive: parseInt(form.min_baby_hive) || 1000,
+      max_participants: form.max_participants ? parseInt(form.max_participants) : undefined,
+      winner_count: parseInt(form.winner_count) || 10,
+    });
+    if (res.success) {
+      toast.success('Giveaway updated!');
+      resetForm();
       await load();
     } else {
       toast.error(res.message);
@@ -1600,8 +1654,8 @@ function AdminGiveaways({ adminId }: { adminId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-white font-bold text-base">Manage Giveaways</h2>
-        <button onClick={() => setShowCreate(!showCreate)} className="flex items-center gap-1.5 px-3 py-2 btn-hive rounded-xl text-xs font-bold">
-          <Plus size={14} /> {showCreate ? 'Cancel' : 'Create'}
+        <button onClick={() => { if (editingId) resetForm(); else setShowCreate(!showCreate); }} className="flex items-center gap-1.5 px-3 py-2 btn-hive rounded-xl text-xs font-bold">
+          <Plus size={14} /> {editingId ? 'Cancel Edit' : showCreate ? 'Cancel' : 'Create'}
         </button>
       </div>
 
@@ -1609,15 +1663,29 @@ function AdminGiveaways({ adminId }: { adminId: string }) {
         <GlassCard className="p-4 space-y-3" animate={false}>
           <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Giveaway title" className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
           <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Description (optional)" className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs resize-none" rows={2} />
-          <input value={form.image_url} onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))} placeholder="Image URL (optional)" className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <input value={form.image_url} onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))} placeholder="Image URL or upload below" className="flex-1 px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
+              <label className="flex items-center gap-1.5 px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white/60 text-xs cursor-pointer hover:bg-white/10 transition-colors">
+                <Upload size={14} />
+                {uploadingImage ? 'Uploading...' : 'Upload'}
+                <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+              </label>
+            </div>
+            {form.image_url && (
+              <div className="relative w-full h-32 rounded-xl overflow-hidden">
+                <img src={form.image_url} alt="Preview" className="w-full h-full object-cover" />
+              </div>
+            )}
+          </div>
           <div className="grid grid-cols-3 gap-2">
             <input value={form.fund_baby_hive} onChange={e => setForm(f => ({ ...f, fund_baby_hive: e.target.value }))} placeholder="Fund (Hive)" type="number" className="px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
             <input value={form.min_baby_hive} onChange={e => setForm(f => ({ ...f, min_baby_hive: e.target.value }))} placeholder="Min Baby Hive" type="number" className="px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
             <input value={form.max_participants} onChange={e => setForm(f => ({ ...f, max_participants: e.target.value }))} placeholder="Max participants" type="number" className="px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
             <input value={form.winner_count} onChange={e => setForm(f => ({ ...f, winner_count: e.target.value }))} placeholder="Winner count (top N)" type="number" className="px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
           </div>
-          <button onClick={handleCreate} disabled={loading} className="w-full py-2.5 btn-hive rounded-xl text-xs font-bold disabled:opacity-50">
-            {loading ? 'Creating...' : 'Create Giveaway'}
+          <button onClick={editingId ? handleUpdate : handleCreate} disabled={loading || uploadingImage} className="w-full py-2.5 btn-hive rounded-xl text-xs font-bold disabled:opacity-50">
+            {loading ? (editingId ? 'Updating...' : 'Creating...') : (editingId ? 'Update Giveaway' : 'Create Giveaway')}
           </button>
         </GlassCard>
       )}
@@ -1626,10 +1694,15 @@ function AdminGiveaways({ adminId }: { adminId: string }) {
         <p className="text-white/30 text-sm text-center py-8">No giveaways yet</p>
       ) : giveaways.map(g => (
         <GlassCard key={g.id} className="p-4" animate={false}>
+          {g.image_url && (
+            <div className="relative w-full h-28 rounded-xl overflow-hidden mb-2">
+              <img src={g.image_url} alt={g.title} className="w-full h-full object-cover" />
+            </div>
+          )}
           <div className="flex items-start justify-between mb-2">
             <div>
               <h3 className="text-white font-semibold text-sm">{g.title}</h3>
-              {g.description && <p className="text-white/40 text-xs mt-0.5">{g.description}</p>}
+              {g.description && <p className="text-white/40 text-xs mt-0.5 whitespace-pre-wrap">{g.description}</p>}
             </div>
             <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${g.status === 'active' ? 'bg-green-500/15 text-green-400' : g.status === 'distributed' ? 'bg-blue-500/15 text-blue-400' : 'bg-yellow-500/15 text-yellow-400'}`}>
               {g.status}
@@ -1642,9 +1715,14 @@ function AdminGiveaways({ adminId }: { adminId: string }) {
             <span>🍼 Min {g.min_baby_hive}</span>
           </div>
           {g.status === 'active' && (
-            <button onClick={() => handleEnd(g.id)} disabled={loading} className="w-full py-2 bg-red-500/15 text-red-400 rounded-xl text-xs font-bold disabled:opacity-50">
-              End & Distribute
-            </button>
+            <div className="flex gap-2">
+              <button onClick={() => handleEdit(g)} disabled={loading} className="flex-1 py-2 bg-white/[0.06] text-white/70 rounded-xl text-xs font-bold disabled:opacity-50">
+                Edit
+              </button>
+              <button onClick={() => handleEnd(g.id)} disabled={loading} className="flex-1 py-2 bg-red-500/15 text-red-400 rounded-xl text-xs font-bold disabled:opacity-50">
+                End & Distribute
+              </button>
+            </div>
           )}
         </GlassCard>
       ))}

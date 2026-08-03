@@ -77,36 +77,43 @@ async function tgSendPhoto(chatId: string | number, caption: string, includeAppB
 }
 
 async function tgSendPhotoToChannel(channel: string, caption: string, photoUrl: string, buttonName?: string, buttonUrl?: string) {
+  // Channels do NOT support web_app buttons — only url buttons
   const keyboard = buttonName && buttonUrl
     ? { inline_keyboard: [[{ text: buttonName, url: buttonUrl }]] }
-    : undefined;
+    : { inline_keyboard: [[{ text: "🐝 Open Hive Earn", url: MINI_APP_URL }]] };
 
   const payload: Record<string, unknown> = {
     chat_id: `@${channel}`,
     photo: photoUrl,
     caption,
     parse_mode: "HTML",
+    reply_markup: keyboard,
   };
-  if (keyboard) payload.reply_markup = keyboard;
 
   const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  return res.json();
+  const data = await res.json();
+  if (!data.ok) console.error(`Channel photo send failed for @${channel}:`, data.description);
+  return data;
 }
 
 async function tgSendMessageToChannel(channel: string, text: string, buttonName?: string, buttonUrl?: string) {
+  // Channels do NOT support web_app buttons — only url buttons
   const keyboard = buttonName && buttonUrl
     ? { inline_keyboard: [[{ text: buttonName, url: buttonUrl }]] }
-    : { inline_keyboard: [[{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }]] };
+    : { inline_keyboard: [[{ text: "🐝 Open Hive Earn", url: MINI_APP_URL }]] };
 
-  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+  const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: `@${channel}`, text, parse_mode: "HTML", reply_markup: keyboard }),
   });
+  const data = await res.json();
+  if (!data.ok) console.error(`Channel send failed for @${channel}:`, data.description);
+  return data;
 }
 
 async function checkChannelMembership(userId: number, channel: string): Promise<boolean> {

@@ -127,7 +127,7 @@ export default function GiveawayPage() {
             <div className="flex items-start justify-between mb-2">
               <div>
                 <h3 className="text-white font-bold text-sm">{g.title}</h3>
-                {g.description && <p className="text-white/40 text-xs mt-0.5">{g.description}</p>}
+                {g.description && <p className="text-white/40 text-xs mt-0.5 whitespace-pre-wrap break-words">{g.description}</p>}
               </div>
               <div className="flex items-center gap-1 px-2 py-1 bg-hive-gold/10 rounded-full">
                 <Trophy size={10} className="text-hive-gold" />
