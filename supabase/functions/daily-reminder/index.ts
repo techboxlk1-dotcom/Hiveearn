@@ -72,6 +72,7 @@ Deno.serve(async (req: Request) => {
         .from("users")
         .select("id, telegram_id, last_reminder_at, is_suspended, is_admin")
         .or(`last_reminder_at.is.null,last_reminder_at.lt.${cutoff}`)
+        .eq("is_suspended", false)
         .neq("telegram_id", 999999999) // exclude guest accounts
         .range(offset, offset + pageSize - 1);
 

@@ -2,7 +2,23 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, PlayCircle, CheckCircle, Globe, Clock, ExternalLink, AlertCircle, Timer, XCircle, Info, RefreshCw } from 'lucide-react';
+import { ArrowLeft, PlayCircle, CheckCircle, Globe, Clock, ExternalLink, AlertCircle, Timer, XCircle, Info, RefreshCw, Shield } from 'lucide-react';
+
+function VpnModal({ onClose }: { onClose: () => void }) {
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }} onClick={onClose}>
+      <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-3xl overflow-hidden" style={{ background: 'rgba(20,20,20,0.98)', border: '1px solid rgba(255,255,255,0.08)' }}>
+        <div className="p-6 text-center">
+          <div className="w-20 h-20 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mx-auto mb-5"><Shield size={40} className="text-blue-400" /></div>
+          <h2 className="text-blue-400 font-black text-xl mb-2">Adsgram AI Ads Unavailable</h2>
+          <p className="text-white/40 text-sm mb-5">Adsgram AI ads are not available in your region.</p>
+          <div className="p-4 mb-5 rounded-xl bg-blue-500/10 border border-blue-500/20"><p className="text-blue-300/80 text-sm">Please use a <b>VPN</b> to change your location and try again. Adsgram AI ads are only available in certain regions.</p></div>
+          <motion.button whileTap={{ scale: 0.96 }} onClick={onClose} className="w-full py-3.5 rounded-xl font-bold text-sm btn-hive">OK, Got it</motion.button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
@@ -206,6 +222,7 @@ export default function AdsPage() {
   const [countdowns, setCountdowns] = useState<Record<string, number>>({});
   const [showAdError, setShowAdError] = useState(false);
   const [showAdClosedEarly, setShowAdClosedEarly] = useState(false);
+  const [showVpnPopup, setShowVpnPopup] = useState(false);
   const [adErrorMessage, setAdErrorMessage] = useState('Ad failed to play. Please try again.');
   const [lastWatchedProvider, setLastWatchedProvider] = useState<ProviderWithCount | null>(null);
 
@@ -322,9 +339,16 @@ export default function AdsPage() {
       if (result.opened && result.watchTimeSeconds >= minWatchSeconds) {
         giveReward(provider);
       } else if (!result.opened && result.watchTimeSeconds === 0) {
-        // Ad never opened at all — no reward
-        setAdErrorMessage('Ad failed to play. Please try again.');
-        setShowAdError(true);
+        // Ad never opened — check if it's Adsgram AI to show VPN popup
+        const slug = provider.slug ?? '';
+        const blockId = provider.block_id ?? '';
+        const isAdsgramAi = blockId === 'int-36139' || slug === 'adsgram-ai' || slug === 'adsgram';
+        if (isAdsgramAi) {
+          setShowVpnPopup(true);
+        } else {
+          setAdErrorMessage('Ad failed to play. Please try again.');
+          setShowAdError(true);
+        }
         startCountdown(provider.id, 5);
       } else {
         // Ad opened but closed before minimum time
@@ -612,6 +636,11 @@ export default function AdsPage() {
             onLater={() => { setVisitIncomplete(false); setCurrentVisitingSite(null); }}
           />
         )}
+      </AnimatePresence>
+
+      {/* VPN popup for Adsgram AI */}
+      <AnimatePresence>
+        {showVpnPopup && <VpnModal onClose={() => setShowVpnPopup(false)} />}
       </AnimatePresence>
     </div>
   );

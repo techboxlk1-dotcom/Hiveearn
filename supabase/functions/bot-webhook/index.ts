@@ -176,13 +176,17 @@ Deno.serve(async (req: Request) => {
       const welcomeText =
         `🐝 <b>Welcome to Hive Earn, ${firstName}!</b>\n\n` +
         `<b>What is Hive Earn?</b>\n` +
-        `Hive Earn is a Telegram mini app where you earn <b>🍯 Hive tokens</b> by watching ads, completing tasks, claiming daily bonuses, and inviting friends. Hive tokens can be withdrawn as <b>USDT (BEP20)</b> to your wallet.\n\n` +
-        `<b>How to earn:</b>\n` +
-        `📺 Watch ads — earn Hive per ad\n` +
+        `Hive Earn is a Telegram mini app where you earn <b>🍯 Hive tokens</b> by watching ads, mining, completing tasks, claiming daily bonuses, and inviting friends. Hive tokens can be withdrawn as <b>USDT (BEP20)</b> to your wallet.\n\n` +
+        `<b>How to earn Hive:</b>\n` +
+        `📺 Watch ads — earn Hive per ad (Earn tab)\n` +
+        `⛏️ Mining — start mining for +20 Hive/hour\n` +
         `✅ Complete tasks — social media tasks with rewards\n` +
         `🎁 Daily bonus — claim every 24 hours\n` +
         `⚡ Reward codes — redeem codes for bonus Hive\n` +
         `👥 Refer friends — earn up to 150 🍯 Hive per referral + 5% commission\n\n` +
+        `<b>Baby Hive & Giveaways:</b>\n` +
+        `🍼 Earn Baby Hive by watching ads in the Giveaway tab\n` +
+        `🎁 Use Baby Hive to join giveaways and win real Hive tokens\n\n` +
         `<b>Withdrawal:</b>\n` +
         `Minimum: $0.08 USDT | Network: BSC (BEP20)\n\n` +
         `Tap the button below to open the mini app and start earning! 🚀`;
@@ -208,7 +212,12 @@ Deno.serve(async (req: Request) => {
         `/start — Open Hive Earn mini app\n` +
         `/help — Show this help message\n\n` +
         `<b>Earn Hive by:</b>\n` +
-        `📺 Watching ads\n✅ Completing tasks\n🎁 Daily bonus\n⚡ Reward codes\n👥 Referring friends\n\n` +
+        `📺 Watching ads (Earn tab)\n⛏️ Mining — +20 Hive/hour\n✅ Completing tasks\n🎁 Daily bonus\n⚡ Reward codes\n👥 Referring friends (150 Hive + 5% commission)\n\n` +
+        `<b>Baby Hive & Giveaways:</b>\n` +
+        `🍼 Watch ads in Giveaway tab to earn Baby Hive\n` +
+        `🎁 Use Baby Hive to join giveaways and win Hive\n\n` +
+        `<b>Withdrawal:</b>\n` +
+        `Minimum: $0.08 USDT | Network: BSC (BEP20)\n\n` +
         `<b>Support:</b> @hiveearnsupport\n` +
         `<b>Community:</b> @${COMMUNITY_CHANNEL}\n` +
         `<b>Payments:</b> @${PAYMENT_CHANNEL}`,

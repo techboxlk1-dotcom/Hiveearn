@@ -37,26 +37,7 @@ export function useAds() {
     slug?: string | null;
     min_watch_seconds?: number | null;
   }): number => {
-    // Always enforce at least 10 seconds for every provider
-    // If the database specifies a higher value (e.g. Adsgram 31s), use that
-    if (provider.min_watch_seconds && provider.min_watch_seconds > UNIVERSAL_MIN_WATCH_SECONDS) {
-      return provider.min_watch_seconds;
-    }
-
-    const blockId = provider.block_id ?? '';
-    const slug = provider.slug ?? '';
-
-    // Adsgram Reward (block ID 36138) — 31 seconds
-    if (blockId === '36138' || slug === 'adsgram-reward') {
-      return 31;
-    }
-
-    // Adsgram AI / Interstitial (block ID int-36139) — 16 seconds
-    if (blockId === 'int-36139' || slug === 'adsgram-ai' || slug === 'adsgram') {
-      return 16;
-    }
-
-    // All other providers (Monetag, Gigapub, Monetix, etc.) — 10 seconds minimum
+    // ALL providers require exactly 10 seconds minimum watch time
     return UNIVERSAL_MIN_WATCH_SECONDS;
   }, []);
 

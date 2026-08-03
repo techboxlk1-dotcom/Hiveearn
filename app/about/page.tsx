@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { ArrowLeft, Tv, CheckSquare, Gift, Ticket, Users, DollarSign, CreditCard, Trophy, Bell, Shield } from 'lucide-react';
+import { ArrowLeft, Tv, CheckSquare, Gift, Ticket, Users, DollarSign, CreditCard, Trophy, Bell, Shield, Baby, Pickaxe } from 'lucide-react';
 import Link from 'next/link';
 import GlassCard from '@/components/ui/GlassCard';
 
@@ -26,7 +26,7 @@ export default function AboutPage() {
           <div className="text-5xl mb-3">🐝</div>
           <h2 className="text-hive-gold font-black text-2xl mb-2">Welcome to Hive Earn!</h2>
           <p className="text-white/60 text-sm leading-relaxed">
-            Hive Earn is a Telegram Mini App where you can earn Hive Tokens by watching ads, completing Telegram tasks, claiming daily bonuses, using reward codes, and inviting friends.
+            Hive Earn is a Telegram Mini App where you earn Hive Tokens by watching ads, mining, completing Telegram tasks, claiming daily bonuses, using reward codes, and inviting friends. You can also earn Baby Hive to join giveaways and win real Hive tokens. Hive tokens can be withdrawn as USDT (BEP20) to your wallet.
           </p>
         </GlassCard>
       </motion.div>
@@ -36,22 +36,25 @@ export default function AboutPage() {
         <h3 className="text-white font-bold text-sm mb-3 px-1">✨ Features</h3>
         <div className="space-y-2">
           {[
-            { icon: Tv, emoji: '📺', label: 'Watch Ads & Earn Hive' },
+            { icon: Tv, emoji: '📺', label: 'Watch Ads & Earn Hive (Earn tab)' },
+            { icon: Pickaxe, emoji: '⛏️', label: 'Mining — Earn +20 Hive every hour' },
+            { icon: Baby, emoji: '🍼', label: 'Earn Baby Hive by watching ads in Giveaway tab' },
+            { icon: Gift, emoji: '🎁', label: 'Join Giveaways with Baby Hive to win Hive' },
             { icon: CheckSquare, emoji: '✅', label: 'Complete Telegram Tasks' },
             { icon: Gift, emoji: '🎁', label: 'Daily Bonus Rewards' },
             { icon: Ticket, emoji: '🎟️', label: 'Reward Code System' },
-            { icon: Users, emoji: '👥', label: 'Refer Friends & Earn More' },
+            { icon: Users, emoji: '👥', label: 'Refer Friends & Earn up to 150 Hive + 5% Commission' },
             { icon: DollarSign, emoji: '💰', label: 'Convert Hive to USDT' },
             { icon: CreditCard, emoji: '💳', label: 'Withdraw via USDT (BEP20)' },
-            { icon: Trophy, emoji: '🏆', label: 'Leaderboard' },
-            { icon: Bell, emoji: '🔔', label: 'Instant Notifications' },
+            { icon: Trophy, emoji: '🏆', label: 'Leaderboard & Monthly Prizes' },
+            { icon: Bell, emoji: '🔔', label: 'Instant Notifications via Bot' },
             { icon: Shield, emoji: '🛡️', label: 'Secure Anti-Fraud Protection' },
           ].map(({ emoji, label }, i) => (
             <motion.div
               key={label}
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.1 + i * 0.05 }}
+              transition={{ delay: 0.1 + i * 0.04 }}
             >
               <GlassCard className="p-3" animate={false}>
                 <div className="flex items-center gap-3">

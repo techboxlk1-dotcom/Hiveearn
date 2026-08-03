@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
-import { Bell, Gift, Trophy, Megaphone, ChevronRight, Wallet, PlayCircle, CheckSquare, Users, Zap, Copy, ExternalLink, Pickaxe, Timer, CheckCircle2 } from 'lucide-react';
+import { Bell, Gift, Trophy, Megaphone, ChevronRight, Wallet, PlayCircle, CheckSquare, Users, Zap, Copy, ExternalLink, Pickaxe, Timer, CheckCircle2, AlertCircle, RefreshCw, XCircle, Shield } from 'lucide-react';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import HiveBalance from '@/components/ui/HiveBalance';
@@ -12,6 +12,101 @@ import { getAnnouncements, getUserTransactions, startMining, claimMining, getMin
 import type { Announcement, Transaction } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { useAds } from '@/hooks/useAds';
+
+// ─── Ad popup modals (shared with other pages) ────────────────────────────────
+function CenteredModal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }}
+        onClick={e => e.stopPropagation()}
+        className="w-full max-w-md rounded-3xl overflow-hidden"
+        style={{ background: 'rgba(20,20,20,0.98)', border: '1px solid rgba(255,255,255,0.08)' }}
+      >
+        {children}
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function AdClosedEarlyModal({ onRetry, onLater }: { onRetry: () => void; onLater: () => void }) {
+  return (
+    <CenteredModal onClose={onLater}>
+      <div className="p-6 text-center">
+        <div className="w-20 h-20 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto mb-5">
+          <XCircle size={40} className="text-red-400" />
+        </div>
+        <h2 className="text-red-400 font-black text-xl mb-2">Ad Closed Too Early!</h2>
+        <p className="text-white/40 text-sm mb-5">You must watch the ad for at least 10 seconds.</p>
+        <div className="p-4 mb-5 rounded-xl bg-red-500/10 border border-red-500/20">
+          <p className="text-red-300/80 text-sm">
+            The ad was closed before 10 seconds. Keep the ad open for at least 10 seconds to receive your reward.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <motion.button whileTap={{ scale: 0.96 }} onClick={onRetry} className="py-3.5 rounded-xl font-bold text-sm" style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff' }}>
+            <span className="flex items-center justify-center gap-2"><RefreshCw size={16} /> Try Again</span>
+          </motion.button>
+          <motion.button whileTap={{ scale: 0.96 }} onClick={onLater} className="py-3.5 rounded-xl font-bold text-sm bg-white/[0.06] text-white/60">
+            Later
+          </motion.button>
+        </div>
+      </div>
+    </CenteredModal>
+  );
+}
+
+function AdErrorModal({ message, onRetry, onLater }: { message: string; onRetry: () => void; onLater: () => void }) {
+  return (
+    <CenteredModal onClose={onLater}>
+      <div className="p-6 text-center">
+        <div className="w-20 h-20 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center mx-auto mb-5">
+          <AlertCircle size={40} className="text-yellow-400" />
+        </div>
+        <h2 className="text-yellow-400 font-black text-xl mb-2">Ad Not Played!</h2>
+        <p className="text-white/40 text-sm mb-5">No reward without watching an ad.</p>
+        <div className="p-4 mb-5 rounded-xl bg-yellow-500/10 border border-yellow-500/20">
+          <p className="text-yellow-300/80 text-sm">{message}</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <motion.button whileTap={{ scale: 0.96 }} onClick={onRetry} className="py-3.5 rounded-xl font-bold text-sm" style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', color: '#fff' }}>
+            <span className="flex items-center justify-center gap-2"><RefreshCw size={16} /> Try Again</span>
+          </motion.button>
+          <motion.button whileTap={{ scale: 0.96 }} onClick={onLater} className="py-3.5 rounded-xl font-bold text-sm bg-white/[0.06] text-white/60">
+            Later
+          </motion.button>
+        </div>
+      </div>
+    </CenteredModal>
+  );
+}
+
+function VpnModal({ onClose }: { onClose: () => void }) {
+  return (
+    <CenteredModal onClose={onClose}>
+      <div className="p-6 text-center">
+        <div className="w-20 h-20 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mx-auto mb-5">
+          <Shield size={40} className="text-blue-400" />
+        </div>
+        <h2 className="text-blue-400 font-black text-xl mb-2">Adsgram AI Ads Unavailable</h2>
+        <p className="text-white/40 text-sm mb-5">Adsgram AI ads are not available in your region.</p>
+        <div className="p-4 mb-5 rounded-xl bg-blue-500/10 border border-blue-500/20">
+          <p className="text-blue-300/80 text-sm">
+            Please use a <b>VPN</b> to change your location and try again. Adsgram AI ads are only available in certain regions.
+          </p>
+        </div>
+        <motion.button whileTap={{ scale: 0.96 }} onClick={onClose} className="w-full py-3.5 rounded-xl font-bold text-sm btn-hive">
+          OK, Got it
+        </motion.button>
+      </div>
+    </CenteredModal>
+  );
+}
 
 const stagger = {
   hidden: {},
@@ -51,13 +146,32 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, [miningStatus.isMining]);
 
+  const [showAdError, setShowAdError] = useState(false);
+  const [showAdClosedEarly, setShowAdClosedEarly] = useState(false);
+  const [showVpnPopup, setShowVpnPopup] = useState(false);
+  const [adErrorMessage, setAdErrorMessage] = useState('Ad failed to play. Please try again.');
+  const [pendingAction, setPendingAction] = useState<'start' | 'claim' | null>(null);
+
   const handleStartMining = useCallback(async () => {
     if (!user || miningLoading) return;
     setMiningLoading(true);
+    setPendingAction('start');
     try {
-      // Show AdsGram ad before starting mining
+      // Show AdsGram ad before starting mining — must watch at least 10 seconds
       const adsgramProvider = { id: 'adsgram', slug: 'adsgram', name: 'AdsGram', reward_per_ad: 0, daily_limit: 999, network_type: 'adsgram' } as const;
-      await startAdWithTimer(adsgramProvider);
+      const result = await startAdWithTimer(adsgramProvider);
+      const minWatch = getMinWatchTime(adsgramProvider);
+
+      if (!result.opened && result.watchTimeSeconds === 0) {
+        setShowVpnPopup(true);
+        setMiningLoading(false);
+        return;
+      }
+      if (!result.opened || result.watchTimeSeconds < minWatch) {
+        setShowAdClosedEarly(true);
+        setMiningLoading(false);
+        return;
+      }
 
       const res = await startMining(user.id);
       if (res.success) {
@@ -67,19 +181,34 @@ export default function HomePage() {
         toast.error(res.message);
       }
     } catch {
-      toast.error('Failed to start mining');
+      setAdErrorMessage('Something went wrong. Please try again.');
+      setShowAdError(true);
     } finally {
       setMiningLoading(false);
+      setPendingAction(null);
     }
-  }, [user, miningLoading, startAdWithTimer]);
+  }, [user, miningLoading, startAdWithTimer, getMinWatchTime]);
 
   const handleClaimMining = useCallback(async () => {
     if (!user || miningLoading) return;
     setMiningLoading(true);
+    setPendingAction('claim');
     try {
-      // Show AdsGram ad before claiming
+      // Show AdsGram ad before claiming — must watch at least 10 seconds
       const adsgramProvider = { id: 'adsgram', slug: 'adsgram', name: 'AdsGram', reward_per_ad: 0, daily_limit: 999, network_type: 'adsgram' } as const;
-      await startAdWithTimer(adsgramProvider);
+      const result = await startAdWithTimer(adsgramProvider);
+      const minWatch = getMinWatchTime(adsgramProvider);
+
+      if (!result.opened && result.watchTimeSeconds === 0) {
+        setShowVpnPopup(true);
+        setMiningLoading(false);
+        return;
+      }
+      if (!result.opened || result.watchTimeSeconds < minWatch) {
+        setShowAdClosedEarly(true);
+        setMiningLoading(false);
+        return;
+      }
 
       const res = await claimMining(user.id);
       if (res.success) {
@@ -89,11 +218,13 @@ export default function HomePage() {
         toast.error(res.message);
       }
     } catch {
-      toast.error('Failed to claim mining');
+      setAdErrorMessage('Something went wrong. Please try again.');
+      setShowAdError(true);
     } finally {
       setMiningLoading(false);
+      setPendingAction(null);
     }
-  }, [user, miningLoading, startAdWithTimer]);
+  }, [user, miningLoading, startAdWithTimer, getMinWatchTime]);
 
   // Auto-open ad on mini app launch
   useEffect(() => {
@@ -412,6 +543,36 @@ export default function HomePage() {
             </div>
           </GlassCard>
         </motion.div>
+
+        {/* Ad popup modals */}
+        <AnimatePresence>
+          {showAdClosedEarly && (
+            <AdClosedEarlyModal
+              onRetry={() => {
+                setShowAdClosedEarly(false);
+                if (pendingAction === 'start') handleStartMining();
+                else if (pendingAction === 'claim') handleClaimMining();
+              }}
+              onLater={() => setShowAdClosedEarly(false)}
+            />
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
+          {showAdError && (
+            <AdErrorModal
+              message={adErrorMessage}
+              onRetry={() => {
+                setShowAdError(false);
+                if (pendingAction === 'start') handleStartMining();
+                else if (pendingAction === 'claim') handleClaimMining();
+              }}
+              onLater={() => setShowAdError(false)}
+            />
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
+          {showVpnPopup && <VpnModal onClose={() => setShowVpnPopup(false)} />}
+        </AnimatePresence>
       </motion.div>
     </div>
   );

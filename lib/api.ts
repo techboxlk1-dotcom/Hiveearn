@@ -475,7 +475,7 @@ export async function startMining(userId: string): Promise<{ success: boolean; m
   if (user?.mining_started_at) return { success: false, message: 'Mining already active', startedAt: user.mining_started_at };
 
   const now = new Date().toISOString();
-  await supabase.from('users').update({ mining_started_at: now }).eq('id', userId);
+  await supabase.from('users').update({ mining_started_at: now, mining_notified: false }).eq('id', userId);
   return { success: true, message: 'Mining started!', startedAt: now };
 }
 
@@ -525,7 +525,7 @@ export async function claimMining(userId: string): Promise<{ success: boolean; h
 }
 
 export async function getMiningStatus(userId: string): Promise<{ isMining: boolean; startedAt: string | null; elapsedHours: number; pendingHive: number }> {
-  const { data: user } = await supabase.from('users').select('mining_started_at').eq('id', userId).maybeSingle();
+  const { data: user } = await supabase.from('users').select('mining_started_at, mining_notified').eq('id', userId).maybeSingle();
   if (!user?.mining_started_at) return { isMining: false, startedAt: null, elapsedHours: 0, pendingHive: 0 };
 
   const elapsedMs = Date.now() - new Date(user.mining_started_at).getTime();
@@ -534,6 +534,15 @@ export async function getMiningStatus(userId: string): Promise<{ isMining: boole
 
   // Mining stops after 1 hour — user must claim and restart
   if (elapsedHours >= 1) {
+    // Send one-time notification that mining is ready to claim
+    if (!user.mining_notified) {
+      const { data: u } = await supabase.from('users').select('telegram_id').eq('id', userId).maybeSingle();
+      if (u?.telegram_id) {
+        await sendBotMessage(u.telegram_id, '⛏️ <b>Mining Complete!</b>\n\nYour Hive mining has finished. You earned <b>20 🍯 Hive</b>!\n\nOpen the app to claim your reward and start mining again. 🚀');
+      }
+      await createNotification(userId, 'mining_ready', '⛏️ Mining Complete!', 'Your mining has finished. Claim your 20 Hive now!');
+      await supabase.from('users').update({ mining_notified: true }).eq('id', userId);
+    }
     return { isMining: false, startedAt: user.mining_started_at, elapsedHours: 1, pendingHive: HIVE_PER_HOUR };
   }
 
@@ -1213,6 +1222,48 @@ export async function getActiveGiveaways(): Promise<Giveaway[]> {
 export async function getAllGiveaways(): Promise<Giveaway[]> {
   const { data } = await supabase.from('giveaways').select('*').order('created_at', { ascending: false });
   return data ?? [];
+}
+
+export async function getEndedGiveaways(): Promise<Giveaway[]> {
+  const { data } = await supabase.from('giveaways').select('*').in('status', ['ended', 'distributed']).order('ended_at', { ascending: false });
+  return data ?? [];
+}
+
+export interface GiveawayWin {
+  id: string;
+  giveaway_id: string;
+  giveaway_title: string;
+  baby_hive_amount: number;
+  hive_won: number;
+  ended_at: string | null;
+}
+
+export async function getGiveawayWinHistory(userId: string): Promise<GiveawayWin[]> {
+  const { data } = await supabase
+    .from('giveaway_participants')
+    .select(`
+      id,
+      giveaway_id,
+      baby_hive_amount,
+      hive_won,
+      giveaways (
+        title,
+        ended_at
+      )
+    `)
+    .eq('user_id', userId)
+    .not('hive_won', 'is', null)
+    .order('giveaway_id', { ascending: false });
+
+  if (!data) return [];
+  return data.map((p: any) => ({
+    id: p.id,
+    giveaway_id: p.giveaway_id,
+    giveaway_title: p.giveaways?.title ?? 'Unknown',
+    baby_hive_amount: p.baby_hive_amount,
+    hive_won: p.hive_won ?? 0,
+    ended_at: p.giveaways?.ended_at ?? null,
+  }));
 }
 
 export async function createGiveaway(adminId: string, giveaway: {
