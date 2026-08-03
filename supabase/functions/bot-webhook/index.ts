@@ -162,6 +162,28 @@ Deno.serve(async (req: Request) => {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
 
+  // GET requests — allow setting webhook via URL
+  if (req.method === "GET") {
+    const url = new URL(req.url);
+    const action = url.searchParams.get("action");
+    if (action === "set_webhook") {
+      const webhookUrl = `${SUPABASE_URL}/functions/v1/bot-webhook`;
+      const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: webhookUrl, drop_pending_updates: true }),
+      });
+      const data = await res.json();
+      return new Response(JSON.stringify({ ok: data.ok, webhookUrl, result: data }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (action === "get_webhook_info") {
+      const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo`);
+      const data = await res.json();
+      return new Response(JSON.stringify(data), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ ok: true, message: "Bot webhook is running. Use ?action=set_webhook to register." }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
   try {
     const update = await req.json();
 
@@ -303,6 +325,25 @@ Deno.serve(async (req: Request) => {
       } catch {
         return new Response(JSON.stringify({ ok: false, error: "Failed to post to channel" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
+    }
+
+    // Set webhook URL with Telegram
+    if (update.type === "set_webhook") {
+      const webhookUrl = `${SUPABASE_URL}/functions/v1/bot-webhook`;
+      const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: webhookUrl, drop_pending_updates: true }),
+      });
+      const data = await res.json();
+      return new Response(JSON.stringify({ ok: data.ok, webhookUrl, result: data }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Get webhook info from Telegram
+    if (update.type === "get_webhook_info") {
+      const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo`);
+      const data = await res.json();
+      return new Response(JSON.stringify(data), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // Handle callback queries

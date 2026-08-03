@@ -74,7 +74,7 @@ export interface Wallet {
 export interface Transaction {
   id: string;
   user_id: string;
-  type: 'reward' | 'ad' | 'task' | 'referral' | 'daily_bonus' | 'reward_code' | 'withdraw' | 'deposit' | 'adjustment' | 'giveaway' | 'leaderboard_prize' | 'mining';
+  type: 'reward' | 'ad' | 'task' | 'referral' | 'daily_bonus' | 'reward_code' | 'withdraw' | 'deposit' | 'adjustment' | 'giveaway' | 'leaderboard_prize' | 'mining' | 'spin' | 'game';
   amount: number;
   description: string | null;
   reference_id: string | null;

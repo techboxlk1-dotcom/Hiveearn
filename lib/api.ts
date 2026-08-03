@@ -324,6 +324,11 @@ export async function claimRewardCode(userId: string, code: string): Promise<{ s
 
 export async function getAdProviders(): Promise<AdProvider[]> {
   const { data } = await supabase.from('ad_providers').select('*').eq('is_active', true).order('sort_order');
+  return (data ?? []).filter(p => (p as { reward_type?: string }).reward_type !== 'baby_hive');
+}
+
+export async function getBabyHiveAdProviders(): Promise<AdProvider[]> {
+  const { data } = await supabase.from('ad_providers').select('*').eq('is_active', true).eq('reward_type', 'baby_hive').order('sort_order');
   return data ?? [];
 }
 
@@ -1207,6 +1212,7 @@ export interface Giveaway {
   min_baby_hive: number;
   max_participants: number | null;
   participant_count: number;
+  winner_count: number;
   status: string;
   created_by: string | null;
   created_at: string;
@@ -1273,6 +1279,7 @@ export async function createGiveaway(adminId: string, giveaway: {
   fund_baby_hive: number;
   min_baby_hive?: number;
   max_participants?: number;
+  winner_count?: number;
 }): Promise<{ success: boolean; message: string }> {
   const { error } = await supabase.from('giveaways').insert({
     title: giveaway.title,
@@ -1281,6 +1288,7 @@ export async function createGiveaway(adminId: string, giveaway: {
     fund_baby_hive: giveaway.fund_baby_hive,
     min_baby_hive: giveaway.min_baby_hive ?? 100,
     max_participants: giveaway.max_participants ?? null,
+    winner_count: giveaway.winner_count ?? 10,
     status: 'active',
     created_by: adminId,
   });
@@ -1306,25 +1314,60 @@ export async function endGiveaway(adminId: string, giveawayId: string): Promise<
     return { success: true, message: 'No Baby Hive contributed', distributed: 0 };
   }
 
+  // Select top N winners by Baby Hive contribution
+  const winnerCount = Math.min(giveaway.winner_count ?? 10, participants.length);
+  const sortedParticipants = [...participants].sort((a, b) => b.baby_hive_amount - a.baby_hive_amount);
+  const winners = sortedParticipants.slice(0, winnerCount);
+  const winnerTotalBabyHive = winners.reduce((sum, p) => sum + p.baby_hive_amount, 0);
+
   const fund = giveaway.fund_baby_hive;
   let distributed = 0;
-  for (const p of participants) {
-    const share = (p.baby_hive_amount / totalBabyHive) * fund;
+  const winnerNames: string[] = [];
+
+  for (const p of winners) {
+    const share = (p.baby_hive_amount / winnerTotalBabyHive) * fund;
     const hiveWon = Math.floor(share * 100) / 100;
     await supabase.from('giveaway_participants').update({ hive_won: hiveWon }).eq('id', p.id);
     await creditHive(p.user_id, hiveWon, 'giveaway', `🎁 Giveaway: ${giveaway.title}`);
     distributed++;
 
-    const { data: user } = await supabase.from('users').select('telegram_id, first_name, username').eq('id', p.user_id).maybeSingle();
-    if (user) {
-      await sendBotMessage(user.telegram_id, `🎁 <b>Giveaway Win!</b>\n\n${user.first_name}, you won <b>${hiveWon} 🍯 Hive</b> from the giveaway "${giveaway.title}"!\n\nYour Baby Hive contribution: ${p.baby_hive_amount} 🍼\nTotal participants: ${participants.length}\n\nCongratulations! 🎉`);
+    const { data: u } = await supabase.from('users').select('telegram_id, first_name, username').eq('id', p.user_id).maybeSingle();
+    if (u) {
+      winnerNames.push(u.username ? `@${u.username}` : u.first_name);
+      await sendBotMessage(u.telegram_id, `🎁 <b>Giveaway Win!</b>\n\n${u.first_name}, you won <b>${hiveWon} 🍯 Hive</b> from the giveaway "${giveaway.title}"!\n\nYour Baby Hive contribution: ${p.baby_hive_amount} 🍼\nWinners: ${winnerCount}\nTotal participants: ${participants.length}\n\nCongratulations! 🎉`);
     }
   }
 
-  await supabase.from('giveaways').update({ status: 'distributed', ended_at: new Date().toISOString(), distributed_at: new Date().toISOString() }).eq('id', giveawayId);
-  await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'end_giveaway', new_data: { giveaway_id: giveawayId, distributed } });
+  // Mark non-winners with hive_won = 0
+  const nonWinners = sortedParticipants.slice(winnerCount);
+  for (const p of nonWinners) {
+    await supabase.from('giveaway_participants').update({ hive_won: 0 }).eq('id', p.id);
+  }
 
-  return { success: true, message: `Distributed to ${distributed} users`, distributed };
+  await supabase.from('giveaways').update({ status: 'distributed', ended_at: new Date().toISOString(), distributed_at: new Date().toISOString() }).eq('id', giveawayId);
+  await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'end_giveaway', new_data: { giveaway_id: giveawayId, distributed, winner_count: winnerCount } });
+
+  // Notify community channel
+  try {
+    const channelText = `🎁 <b>Giveaway Winners Announced!</b>\n\n<b>${giveaway.title}</b>\n\n🏆 <b>Top ${winnerCount} Winners:</b>\n${winnerNames.map((n, i) => `${i + 1}. ${n}`).join('\n')}\n\n💰 Prize Pool: ${fund} 🍯 Hive\n👥 Total Participants: ${participants.length}\n\nCongratulations to all winners! 🎉`;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    await fetch(`${supabaseUrl}/functions/v1/bot-webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${supabaseAnonKey}` },
+      body: JSON.stringify({ type: 'broadcast_to_channel', caption: channelText }),
+    });
+  } catch { /* ignore channel errors */ }
+
+  // Notify admin
+  try {
+    const { data: adminUser } = await supabase.from('users').select('telegram_id').eq('id', adminId).maybeSingle();
+    if (adminUser?.telegram_id) {
+      await sendBotMessage(adminUser.telegram_id, `🎁 <b>Giveaway Ended</b>\n\n<b>${giveaway.title}</b>\nWinners: ${winnerCount}\nDistributed: ${distributed} users\nTotal participants: ${participants.length}\nPrize pool: ${fund} Hive`);
+    }
+  } catch { /* ignore */ }
+
+  return { success: true, message: `Distributed to ${distributed} winners (top ${winnerCount} of ${participants.length})`, distributed };
 }
 
 export async function participateGiveaway(userId: string, giveawayId: string, babyHiveAmount: number): Promise<{ success: boolean; message: string }> {
@@ -1335,8 +1378,16 @@ export async function participateGiveaway(userId: string, giveawayId: string, ba
   if (!user || user.baby_hive_balance < babyHiveAmount) return { success: false, message: 'Insufficient Baby Hive balance' };
   if (babyHiveAmount < giveaway.min_baby_hive) return { success: false, message: `Minimum ${giveaway.min_baby_hive} Baby Hive required` };
 
-  const { data: existing } = await supabase.from('giveaway_participants').select('id').eq('giveaway_id', giveawayId).eq('user_id', userId).maybeSingle();
-  if (existing) return { success: false, message: 'Already participating in this giveaway' };
+  // Check if already participating — if so, allow adding more Baby Hive
+  const { data: existing } = await supabase.from('giveaway_participants').select('*').eq('giveaway_id', giveawayId).eq('user_id', userId).maybeSingle();
+  if (existing) {
+    // Add more Baby Hive to existing participation
+    const newAmount = existing.baby_hive_amount + babyHiveAmount;
+    const { error: updateErr } = await supabase.from('giveaway_participants').update({ baby_hive_amount: newAmount }).eq('id', existing.id);
+    if (updateErr) return { success: false, message: updateErr.message };
+    await supabase.from('users').update({ baby_hive_balance: user.baby_hive_balance - babyHiveAmount }).eq('id', userId);
+    return { success: true, message: `Added ${babyHiveAmount} more Baby Hive! Total: ${newAmount}` };
+  }
 
   if (giveaway.max_participants && giveaway.participant_count >= giveaway.max_participants) {
     return { success: false, message: 'Giveaway is full' };
@@ -1444,4 +1495,91 @@ export async function generateMonthlyLeaderboard(adminId: string): Promise<{ suc
 
   await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'generate_leaderboard', new_data: { month } });
   return { success: true, message: `Leaderboard generated for ${month}` };
+}
+
+// ─── Spin Wheel ──────────────────────────────────────────────────────────────
+
+const SPIN_COOLDOWN_HOURS = 12;
+
+export async function getSpinStatus(userId: string): Promise<{ canSpin: boolean; hoursLeft: number; lastSpinAt: string | null; totalSpins: number }> {
+  const { data: lastSpin } = await supabase
+    .from('spin_wheel_plays')
+    .select('played_at')
+    .eq('user_id', userId)
+    .order('played_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { count } = await supabase
+    .from('spin_wheel_plays')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId);
+
+  if (!lastSpin) return { canSpin: true, hoursLeft: 0, lastSpinAt: null, totalSpins: count ?? 0 };
+
+  const elapsedMs = Date.now() - new Date(lastSpin.played_at).getTime();
+  const elapsedHours = elapsedMs / (1000 * 60 * 60);
+  const hoursLeft = Math.max(0, Math.ceil(SPIN_COOLDOWN_HOURS - elapsedHours));
+
+  return { canSpin: hoursLeft === 0, hoursLeft, lastSpinAt: lastSpin.played_at, totalSpins: count ?? 0 };
+}
+
+export async function playSpinWheel(userId: string): Promise<{ success: boolean; hive: number; message: string }> {
+  const guard = await checkNotSuspended(userId);
+  if (!guard.ok) return { success: false, hive: 0, message: guard.message };
+
+  const status = await getSpinStatus(userId);
+  if (!status.canSpin) return { success: false, hive: 0, message: `Come back in ${status.hoursLeft}h to spin again` };
+
+  // Weighted random: 2-20 Hive, heavily weighted toward low values
+  const weights = [30, 25, 20, 12, 8, 3, 1, 1]; // 2,3,4,5,8,12,15,20
+  const values = [2, 3, 4, 5, 8, 12, 15, 20];
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  let rand = Math.random() * totalWeight;
+  let hiveWon = 2;
+  for (let i = 0; i < weights.length; i++) {
+    rand -= weights[i];
+    if (rand <= 0) { hiveWon = values[i]; break; }
+  }
+
+  await supabase.from('spin_wheel_plays').insert({ user_id: userId, hive_won: hiveWon });
+  await creditHive(userId, hiveWon, 'spin', '🎡 Spin Wheel reward');
+  await createNotification(userId, 'reward', '🎡 Spin Wheel!', `You won ${hiveWon} 🍯 Hive from the spin wheel!`);
+
+  return { success: true, hive: hiveWon, message: `+${hiveWon} Hive won!` };
+}
+
+// ─── Mini Game ───────────────────────────────────────────────────────────────
+
+export async function recordGameReward(userId: string, score: number, hiveEarned: number): Promise<{ success: boolean; message: string }> {
+  const guard = await checkNotSuspended(userId);
+  if (!guard.ok) return { success: false, message: guard.message };
+
+  if (hiveEarned <= 0 || hiveEarned > 50) return { success: false, message: 'Invalid reward amount' };
+
+  await supabase.from('transactions').insert({
+    user_id: userId,
+    type: 'game',
+    amount: hiveEarned,
+    description: `🎮 Mini Game — Score: ${score}`,
+    status: 'completed',
+  });
+  await creditHive(userId, hiveEarned, 'game', `🎮 Mini Game reward (Score: ${score})`);
+  await createNotification(userId, 'reward', '🎮 Game Reward!', `You earned ${hiveEarned} 🍯 Hive from the mini game!`);
+
+  return { success: true, message: `+${hiveEarned} Hive earned!` };
+}
+
+export async function getGameHighScore(userId: string): Promise<number> {
+  const { data } = await supabase
+    .from('transactions')
+    .select('description')
+    .eq('user_id', userId)
+    .eq('type', 'game')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data) return 0;
+  const match = data.description?.match(/Score:\s*(\d+)/);
+  return match ? parseInt(match[1]) : 0;
 }

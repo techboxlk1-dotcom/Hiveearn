@@ -1145,16 +1145,16 @@ function AdminAdMessages({ adminId }: { adminId: string }) {
 
 // ─── Ad Providers ─────────────────────────────────────────────────────────────
 function AdminAds({ adminId }: { adminId: string }) {
-  const [providers, setProviders] = useState<Array<{ id: string; name: string; reward_per_ad: number; daily_limit: number; is_active: boolean; sort_order: number; block_id?: string; network_type?: string; min_watch_seconds?: number; sdk_zone?: string }>>([]);
+  const [providers, setProviders] = useState<Array<{ id: string; name: string; reward_per_ad: number; daily_limit: number; is_active: boolean; sort_order: number; block_id?: string; network_type?: string; min_watch_seconds?: number; sdk_zone?: string; reward_type?: string }>>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '' });
+  const [form, setForm] = useState({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '', reward_type: 'hive' });
 
   const load = () => supabase.from('ad_providers').select('*').order('sort_order').then(({ data }) => setProviders(data ?? []));
   useEffect(() => { load(); }, []);
 
   const handleCreate = async () => {
-    if (!form.name || !form.reward_per_ad) { toast.error('Name and Hive/ad required'); return; }
+    if (!form.name || !form.reward_per_ad) { toast.error('Name and reward/ad required'); return; }
     const res = await createAdProvider(adminId, {
       name: form.name,
       reward_per_ad: parseFloat(form.reward_per_ad),
@@ -1166,9 +1166,13 @@ function AdminAds({ adminId }: { adminId: string }) {
       sdk_zone: form.sdk_zone || undefined,
     });
     if (res.success) {
+      // Set reward_type after creation
+      if (form.reward_type === 'baby_hive') {
+        await supabase.from('ad_providers').update({ reward_type: 'baby_hive' }).eq('name', form.name);
+      }
       toast.success('Ad provider created');
       setShowForm(false);
-      setForm({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '' });
+      setForm({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '', reward_type: 'hive' });
       load();
     } else {
       toast.error(res.message);
@@ -1185,9 +1189,12 @@ function AdminAds({ adminId }: { adminId: string }) {
       min_watch_seconds: parseInt(form.min_watch_seconds) || 15,
       sdk_zone: form.sdk_zone || undefined,
     });
+    if (form.reward_type) {
+      await supabase.from('ad_providers').update({ reward_type: form.reward_type }).eq('id', id);
+    }
     toast.success('Provider updated');
     setEditingId(null);
-    setForm({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '' });
+    setForm({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '', reward_type: 'hive' });
     load();
   };
 
@@ -1202,6 +1209,7 @@ function AdminAds({ adminId }: { adminId: string }) {
       network_type: p.network_type ?? 'interstitial',
       min_watch_seconds: String(p.min_watch_seconds ?? 15),
       sdk_zone: p.sdk_zone ?? '',
+      reward_type: p.reward_type ?? 'hive',
     });
   };
 
@@ -1217,20 +1225,60 @@ function AdminAds({ adminId }: { adminId: string }) {
     load();
   };
 
+  const renderProviderList = (type: 'hive' | 'baby_hive', label: string, emoji: string) => {
+    const filtered = providers.filter(p => (p.reward_type ?? 'hive') === type);
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 px-1">
+          <span className="text-sm">{emoji}</span>
+          <h4 className="text-white/60 font-bold text-xs uppercase tracking-wider">{label} ({filtered.length})</h4>
+        </div>
+        <GlassCard className="divide-y divide-white/[0.04] overflow-hidden" animate={false}>
+          {filtered.length === 0 && <p className="text-white/30 text-xs text-center py-6">No {label.toLowerCase()} providers</p>}
+          {filtered.map(p => (
+            <div key={p.id} className="flex items-center gap-2 p-3">
+              <div className="flex-1 min-w-0">
+                <p className={`text-xs font-semibold ${p.is_active ? 'text-white/80' : 'text-white/30 line-through'}`}>{p.name}</p>
+                <p className="text-white/40 text-[10px]">{p.reward_per_ad} {type === 'hive' ? '🍯' : '🍼'}/ad • {p.daily_limit}/day {p.block_id && <span className="text-blue-400">• {p.block_id}</span>}</p>
+                {p.min_watch_seconds && <p className="text-white/30 text-[9px]">Min watch: {p.min_watch_seconds}s • {p.network_type}</p>}
+              </div>
+              <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleEdit(p)} className="px-2 py-1 rounded-lg bg-blue-500/15 text-blue-400 text-[10px] font-bold">
+                <Edit2 size={12} />
+              </motion.button>
+              <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleToggle(p.id, p.is_active)} className={`px-2 py-1 rounded-lg text-[10px] font-bold ${p.is_active ? 'bg-green-500/15 text-green-400' : 'bg-white/[0.06] text-white/40'}`}>
+                {p.is_active ? 'Active' : 'Off'}
+              </motion.button>
+              <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleDelete(p.id)} className="px-2 py-1 rounded-lg bg-red-500/15 text-red-400 text-[10px] font-bold">
+                <Trash2 size={12} />
+              </motion.button>
+            </div>
+          ))}
+        </GlassCard>
+      </div>
+    );
+  };
+
   return (
-    <div className="space-y-3">
-      <motion.button whileTap={{ scale: 0.96 }} onClick={() => { setShowForm(!showForm); setEditingId(null); setForm({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '' }); }} className="w-full flex items-center justify-center gap-2 py-3 btn-hive rounded-xl font-bold text-sm">
+    <div className="space-y-4">
+      <motion.button whileTap={{ scale: 0.96 }} onClick={() => { setShowForm(!showForm); setEditingId(null); setForm({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '', reward_type: 'hive' }); }} className="w-full flex items-center justify-center gap-2 py-3 btn-hive rounded-xl font-bold text-sm">
         <Plus size={16} /> {showForm ? 'Cancel' : 'Add Ad Provider'}
       </motion.button>
 
       {showForm && (
         <GlassCard className="p-4 space-y-3" animate={false}>
+          <div>
+            <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">Reward Type</label>
+            <select value={form.reward_type} onChange={e => setForm(f => ({ ...f, reward_type: e.target.value }))} className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs focus:outline-none">
+              <option value="hive">🍯 Hive (Earn tab)</option>
+              <option value="baby_hive">🍼 Baby Hive (Giveaway tab)</option>
+            </select>
+          </div>
           {[
             { key: 'name', label: 'Provider Name *', placeholder: 'e.g. Adsgram', type: 'text' },
             { key: 'block_id', label: 'Block ID', placeholder: 'e.g. 36138 or int-36139', type: 'text' },
-            { key: 'reward_per_ad', label: 'Hive per Ad *', placeholder: 'e.g. 8', type: 'number' },
-            { key: 'daily_limit', label: 'Daily Limit', placeholder: 'e.g. 10', type: 'number' },
-            { key: 'min_watch_seconds', label: 'Min Watch Seconds', placeholder: 'e.g. 15', type: 'number' },
+            { key: 'reward_per_ad', label: form.reward_type === 'baby_hive' ? 'Baby Hive per Ad *' : 'Hive per Ad *', placeholder: 'e.g. 100', type: 'number' },
+            { key: 'daily_limit', label: 'Daily Limit', placeholder: 'e.g. 100', type: 'number' },
+            { key: 'min_watch_seconds', label: 'Min Watch Seconds', placeholder: 'e.g. 10', type: 'number' },
             { key: 'sdk_zone', label: 'SDK Zone', placeholder: 'e.g. 11196790', type: 'text' },
           ].map(({ key, label, placeholder, type }) => (
             <div key={key}>
@@ -1251,34 +1299,15 @@ function AdminAds({ adminId }: { adminId: string }) {
             {editingId ? <span className="flex items-center justify-center gap-2"><Save size={16} /> Update Provider</span> : 'Create Provider'}
           </motion.button>
           {editingId && (
-            <motion.button whileTap={{ scale: 0.96 }} onClick={() => { setEditingId(null); setForm({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '' }); }} className="w-full py-2 bg-white/[0.06] rounded-xl font-bold text-xs text-white/50">
+            <motion.button whileTap={{ scale: 0.96 }} onClick={() => { setEditingId(null); setForm({ name: '', reward_per_ad: '', daily_limit: '10', sort_order: '0', block_id: '', network_type: 'interstitial', min_watch_seconds: '15', sdk_zone: '', reward_type: 'hive' }); }} className="w-full py-2 bg-white/[0.06] rounded-xl font-bold text-xs text-white/50">
               Cancel Edit
             </motion.button>
           )}
         </GlassCard>
       )}
 
-      <GlassCard className="divide-y divide-white/[0.04] overflow-hidden" animate={false}>
-        {providers.length === 0 && <p className="text-white/30 text-xs text-center py-6">No ad providers</p>}
-        {providers.map(p => (
-          <div key={p.id} className="flex items-center gap-2 p-3">
-            <div className="flex-1 min-w-0">
-              <p className={`text-xs font-semibold ${p.is_active ? 'text-white/80' : 'text-white/30 line-through'}`}>{p.name}</p>
-              <p className="text-white/40 text-[10px]">{p.reward_per_ad} 🍯/ad • {p.daily_limit}/day {p.block_id && <span className="text-blue-400">• {p.block_id}</span>}</p>
-              {p.min_watch_seconds && <p className="text-white/30 text-[9px]">Min watch: {p.min_watch_seconds}s • {p.network_type}</p>}
-            </div>
-            <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleEdit(p)} className="px-2 py-1 rounded-lg bg-blue-500/15 text-blue-400 text-[10px] font-bold">
-              <Edit2 size={12} />
-            </motion.button>
-            <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleToggle(p.id, p.is_active)} className={`px-2 py-1 rounded-lg text-[10px] font-bold ${p.is_active ? 'bg-green-500/15 text-green-400' : 'bg-white/[0.06] text-white/40'}`}>
-              {p.is_active ? 'Active' : 'Off'}
-            </motion.button>
-            <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleDelete(p.id)} className="px-2 py-1 rounded-lg bg-red-500/15 text-red-400 text-[10px] font-bold">
-              <Trash2 size={12} />
-            </motion.button>
-          </div>
-        ))}
-      </GlassCard>
+      {renderProviderList('hive', 'Hive Ads', '🍯')}
+      {renderProviderList('baby_hive', 'Baby Hive Ads', '🍼')}
     </div>
   );
 }
@@ -1519,9 +1548,9 @@ function AdminLogs() {
 // ─── Admin Giveaways ──────────────────────────────────────────────────────────
 
 function AdminGiveaways({ adminId }: { adminId: string }) {
-  const [giveaways, setGiveaways] = useState<Array<{ id: string; title: string; description: string | null; image_url: string | null; fund_baby_hive: number; min_baby_hive: number; max_participants: number | null; participant_count: number; status: string; created_at: string }>>([]);
+  const [giveaways, setGiveaways] = useState<Array<{ id: string; title: string; description: string | null; image_url: string | null; fund_baby_hive: number; min_baby_hive: number; max_participants: number | null; participant_count: number; winner_count: number; status: string; created_at: string }>>([]);
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ title: '', description: '', image_url: '', fund_baby_hive: '1000', min_baby_hive: '100', max_participants: '' });
+  const [form, setForm] = useState({ title: '', description: '', image_url: '', fund_baby_hive: '1000', min_baby_hive: '100', max_participants: '', winner_count: '10' });
   const [loading, setLoading] = useState(false);
 
   const load = async () => {
@@ -1541,10 +1570,11 @@ function AdminGiveaways({ adminId }: { adminId: string }) {
       fund_baby_hive: parseInt(form.fund_baby_hive),
       min_baby_hive: parseInt(form.min_baby_hive) || 100,
       max_participants: form.max_participants ? parseInt(form.max_participants) : undefined,
+      winner_count: parseInt(form.winner_count) || 10,
     });
     if (res.success) {
       toast.success('Giveaway created!');
-      setForm({ title: '', description: '', image_url: '', fund_baby_hive: '1000', min_baby_hive: '100', max_participants: '' });
+      setForm({ title: '', description: '', image_url: '', fund_baby_hive: '1000', min_baby_hive: '100', max_participants: '', winner_count: '10' });
       setShowCreate(false);
       await load();
     } else {
@@ -1584,6 +1614,7 @@ function AdminGiveaways({ adminId }: { adminId: string }) {
             <input value={form.fund_baby_hive} onChange={e => setForm(f => ({ ...f, fund_baby_hive: e.target.value }))} placeholder="Fund (Hive)" type="number" className="px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
             <input value={form.min_baby_hive} onChange={e => setForm(f => ({ ...f, min_baby_hive: e.target.value }))} placeholder="Min Baby Hive" type="number" className="px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
             <input value={form.max_participants} onChange={e => setForm(f => ({ ...f, max_participants: e.target.value }))} placeholder="Max participants" type="number" className="px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
+            <input value={form.winner_count} onChange={e => setForm(f => ({ ...f, winner_count: e.target.value }))} placeholder="Winner count (top N)" type="number" className="px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs" />
           </div>
           <button onClick={handleCreate} disabled={loading} className="w-full py-2.5 btn-hive rounded-xl text-xs font-bold disabled:opacity-50">
             {loading ? 'Creating...' : 'Create Giveaway'}
@@ -1607,6 +1638,7 @@ function AdminGiveaways({ adminId }: { adminId: string }) {
           <div className="flex items-center gap-4 text-xs text-white/40 mb-3">
             <span>🎁 {g.fund_baby_hive} Hive</span>
             <span>👥 {g.participant_count}{g.max_participants ? `/${g.max_participants}` : ''} joined</span>
+            <span>🏆 Top {g.winner_count ?? 10} win</span>
             <span>🍼 Min {g.min_baby_hive}</span>
           </div>
           {g.status === 'active' && (

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Gift, Users, Clock, Baby, Trophy, Sparkles, PlayCircle, History, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Gift, Users, Clock, Baby, Trophy, Sparkles, PlayCircle, History, CheckCircle, Dices, Gamepad2 } from 'lucide-react';
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
@@ -11,8 +11,10 @@ import type { GiveawayWin } from '@/lib/api';
 import { toast } from 'sonner';
 import { useRewardPopup } from '@/components/ui/RewardPopup';
 import GiveawayAdsSection from './GiveawayAdsSection';
+import SpinWheel from './SpinWheel';
+import MiniGame from './MiniGame';
 
-type GiveawayTab = 'available' | 'all' | 'ended' | 'wins' | 'earn';
+type GiveawayTab = 'available' | 'all' | 'ended' | 'wins' | 'earn' | 'spin' | 'game';
 
 export default function GiveawayPage() {
   const { user, refreshUser } = useUser();
@@ -102,6 +104,8 @@ export default function GiveawayPage() {
     { id: 'ended', label: 'Ended', icon: Clock },
     { id: 'wins', label: 'Win History', icon: Trophy },
     { id: 'earn', label: 'Earn Baby Hive', icon: Baby },
+    { id: 'spin', label: 'Spin', icon: Dices },
+    { id: 'game', label: 'Game', icon: Gamepad2 },
   ];
 
   const renderGiveawayCard = (g: Giveaway, index: number) => {
@@ -151,10 +155,40 @@ export default function GiveawayPage() {
                 <span className="text-white/40 text-sm font-bold">Giveaway Ended</span>
               </div>
             ) : isParticipating ? (
-              <div className="flex items-center justify-center gap-2 py-3 bg-green-500/10 rounded-xl">
-                <Sparkles size={16} className="text-green-400" />
-                <span className="text-green-400 text-sm font-bold">You&apos;re participating!</span>
-              </div>
+              <>
+                <div className="flex items-center justify-center gap-2 py-2.5 bg-green-500/10 rounded-xl mb-2">
+                  <Sparkles size={16} className="text-green-400" />
+                  <span className="text-green-400 text-sm font-bold">You&apos;re participating!</span>
+                </div>
+                <div className="mb-2">
+                  <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">Add more Baby Hive</label>
+                  <div className="flex items-center gap-2">
+                    {[g.min_baby_hive, g.min_baby_hive * 2, g.min_baby_hive * 5].map(amt => (
+                      <button
+                        key={amt}
+                        onClick={() => setSelectedAmount(prev => ({ ...prev, [g.id]: amt }))}
+                        className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${amount === amt ? 'bg-pink-500/20 text-pink-400 border border-pink-500/30' : 'bg-white/[0.04] text-white/40 border border-white/[0.06]'}`}
+                      >
+                        +{amt} 🍼
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <motion.button
+                  whileTap={{ scale: 0.96 }}
+                  onClick={() => handleJoin(g)}
+                  disabled={joining === g.id || babyHiveBalance < g.min_baby_hive}
+                  className="w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg,#F5C518,#FFB300)', color: '#0A0A0A' }}
+                >
+                  {joining === g.id ? (
+                    <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full" />
+                  ) : (
+                    <Gift size={16} />
+                  )}
+                  {babyHiveBalance < g.min_baby_hive ? 'Not enough Baby Hive' : `Add ${amount} 🍼 More`}
+                </motion.button>
+              </>
             ) : (
               <>
                 <div className="mb-3">
@@ -255,6 +289,14 @@ export default function GiveawayPage() {
         {activeTab === 'earn' ? (
           <motion.div key="earn" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }}>
             <GiveawayAdsSection />
+          </motion.div>
+        ) : activeTab === 'spin' ? (
+          <motion.div key="spin" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }}>
+            <SpinWheel />
+          </motion.div>
+        ) : activeTab === 'game' ? (
+          <motion.div key="game" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }}>
+            <MiniGame />
           </motion.div>
         ) : activeTab === 'wins' ? (
           <motion.div key="wins" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-4">

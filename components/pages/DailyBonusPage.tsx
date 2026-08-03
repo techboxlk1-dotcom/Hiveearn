@@ -122,6 +122,21 @@ export default function DailyBonusPage() {
             <span className="text-white/70 text-sm">Day <span className="text-hive-gold font-bold">{Math.min(streakDay, 30)}</span> streak</span>
           </div>
 
+          {/* 7-day progress */}
+          <div className="flex items-center justify-center gap-1.5 mb-6">
+            {[1, 2, 3, 4, 5, 6, 7].map(day => {
+              const isDone = day <= history.length;
+              const isToday = day === history.length + 1 && canClaim;
+              return (
+                <div key={day} className="flex flex-col items-center gap-1">
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold ${isDone ? 'bg-hive-gold text-black' : isToday ? 'border-2 border-hive-gold/50 bg-hive-gold/10 text-hive-gold' : 'bg-white/[0.05] text-white/20'}`}>
+                    {isDone ? <CheckCircle size={12} /> : day}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
           {/* Claim button */}
           <AnimatePresence mode="wait">
             {canClaim ? (

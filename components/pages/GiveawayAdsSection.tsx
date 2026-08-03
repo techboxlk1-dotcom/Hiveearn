@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { PlayCircle, CheckCircle, Clock, AlertCircle, RefreshCw, XCircle, Shield, Baby, Info } from 'lucide-react';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
-import { getAdProviders, getTodayAdCount, recordAdWatch, addBabyHive } from '@/lib/api';
+import { getBabyHiveAdProviders, getTodayAdCount, recordAdWatch, addBabyHive } from '@/lib/api';
 import type { AdProvider } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { useRewardPopup } from '@/components/ui/RewardPopup';
@@ -159,7 +159,7 @@ export default function GiveawayAdsSection() {
   useEffect(() => {
     if (!user) return;
     const load = async () => {
-      const ps = await getAdProviders();
+      const ps = await getBabyHiveAdProviders();
       const withCounts = await Promise.all(
         ps.map(async p => ({ ...p, todayCount: await getTodayAdCount(user.id, p.id) }))
       );

@@ -158,7 +158,7 @@ async function processSingleWithdrawal(
 
   try {
     // Get wallet credentials from secrets
-    const hotWalletAddress = env.HOT_WALLET_ADDRESS;
+    const hotWalletAddress = env.HOT_WALLET_ADDRES || env.HOT_WALLET_ADDRESS;
     const hotWalletMnemonic = env.HOT_WALLET_PRIVATE_KEY;
 
     if (!hotWalletAddress || !hotWalletMnemonic) {
