@@ -14,6 +14,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
+// Keyboard for private chats — web_app buttons are allowed here
 function getMainKeyboard() {
   return {
     inline_keyboard: [
@@ -26,7 +27,8 @@ function getMainKeyboard() {
   };
 }
 
-function getPaymentKeyboard(txid: string) {
+// Keyboard for payment approval to private chat (user)
+function getUserPaymentKeyboard(txid: string) {
   return {
     inline_keyboard: [
       [{ text: "🐝 Open Mini App", web_app: { url: MINI_APP_URL } }],
@@ -38,21 +40,12 @@ function getPaymentKeyboard(txid: string) {
   };
 }
 
-function getPaymentChannelKeyboard(txid: string) {
+// Keyboard for CHANNEL posts — NO web_app buttons (Telegram rejects them in channels)
+function getChannelPaymentKeyboard(txid: string) {
   return {
     inline_keyboard: [
-      [{ text: "🐝 Open Mini App", web_app: { url: MINI_APP_URL } }],
+      [{ text: "🐝 Open Mini App", url: MINI_APP_URL }],
       [{ text: "View Transaction", url: `https://bscscan.com/tx/${txid}` }],
-    ],
-  };
-}
-
-function getUserPaymentKeyboard(txid: string) {
-  return {
-    inline_keyboard: [
-      [{ text: "View Transaction", url: `https://bscscan.com/tx/${txid}` }],
-      [{ text: "Payment Channel", url: `https://t.me/${PAYMENT_CHANNEL}` }],
-      [{ text: "Open Mini App", web_app: { url: MINI_APP_URL } }],
     ],
   };
 }
@@ -70,7 +63,9 @@ async function sendMessage(chatId: string | number, text: string, keyboard?: unk
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  return res.json();
+  const data = await res.json();
+  if (!data.ok) console.error(`sendMessage failed for ${chatId}:`, data.description);
+  return data;
 }
 
 async function sendPhoto(chatId: string | number, photo: string, caption: string, keyboard?: unknown) {
@@ -90,6 +85,7 @@ async function sendPhoto(chatId: string | number, photo: string, caption: string
   const data = await res.json();
 
   if (!data.ok) {
+    console.error(`sendPhoto failed for ${chatId}:`, data.description);
     return sendMessage(chatId, caption, keyboard);
   }
   return data;
@@ -122,12 +118,16 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    const isChannel = String(chat_id).startsWith("@");
+
     // Handle payment approval messages with special keyboards
     if (payment_type === "approved" && txid) {
-      if (!String(chat_id).startsWith("@")) {
+      if (!isChannel) {
+        // Private chat — web_app buttons OK
         await sendMessage(chat_id, text, getUserPaymentKeyboard(txid), parse_mode);
       } else {
-        await sendMessage(chat_id, text, getPaymentChannelKeyboard(txid), parse_mode);
+        // Channel — URL buttons only, no web_app
+        await sendMessage(chat_id, text, getChannelPaymentKeyboard(txid), parse_mode);
       }
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -137,19 +137,34 @@ Deno.serve(async (req: Request) => {
     // Handle custom buttons
     let customKeyboard: unknown = undefined;
     if (button_name && button_url) {
-      customKeyboard = {
-        inline_keyboard: [
-          [{ text: button_name, url: button_url }],
-          [{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }],
-        ],
-      };
+      if (isChannel) {
+        // Channel — no web_app button
+        customKeyboard = {
+          inline_keyboard: [
+            [{ text: button_name, url: button_url }],
+            [{ text: "🐝 Open Hive Earn", url: MINI_APP_URL }],
+          ],
+        };
+      } else {
+        customKeyboard = {
+          inline_keyboard: [
+            [{ text: button_name, url: button_url }],
+            [{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }],
+          ],
+        };
+      }
     }
 
     // If include_banner is true, send photo with banner
     if (include_banner) {
       const photo = photo_url || BANNER_PHOTO || (APP_URL ? `${APP_URL}/IMG-20260624-WA0001.jpg` : "");
       if (photo) {
-        const keyboard = customKeyboard || (include_app_button ? getMainKeyboard() : undefined);
+        let keyboard = customKeyboard;
+        if (!keyboard && include_app_button) {
+          keyboard = isChannel
+            ? { inline_keyboard: [[{ text: "🐝 Open Hive Earn", url: MINI_APP_URL }]] }
+            : getMainKeyboard();
+        }
         await sendPhoto(chat_id, photo, text, keyboard);
         return new Response(JSON.stringify({ ok: true }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -158,7 +173,12 @@ Deno.serve(async (req: Request) => {
     }
 
     // Regular text message
-    const keyboard = customKeyboard || (include_app_button ? getMainKeyboard() : undefined);
+    let keyboard = customKeyboard;
+    if (!keyboard && include_app_button) {
+      keyboard = isChannel
+        ? { inline_keyboard: [[{ text: "🐝 Open Hive Earn", url: MINI_APP_URL }]] }
+        : getMainKeyboard();
+    }
     const result = await sendMessage(chat_id, text, keyboard, parse_mode);
 
     return new Response(JSON.stringify({ ok: result.ok, result: result.result, error: result.description }), {

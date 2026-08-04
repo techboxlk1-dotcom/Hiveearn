@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Play, Gamepad2, Trophy, Clock } from 'lucide-react';
 import GlassCard from '@/components/ui/GlassCard';
 import { useUser } from '@/contexts/UserContext';
-import { recordGameReward, getGameHighScore } from '@/lib/api';
+import { recordGameReward, getGameHighScore, getGameStatus } from '@/lib/api';
 import { useAds } from '@/hooks/useAds';
 import { useRewardPopup } from '@/components/ui/RewardPopup';
 import { toast } from 'sonner';
@@ -28,18 +28,25 @@ export default function MiniGame() {
   const [timeLeft, setTimeLeft] = useState(GAME_TIME_SECONDS);
   const [highScore, setHighScore] = useState(0);
   const [gameId, setGameId] = useState(0);
+  const [gameStatus, setGameStatus] = useState<{ canPlay: boolean; hoursLeft: number }>({ canPlay: true, hoursLeft: 0 });
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadHigh = useCallback(async () => {
     if (!user) return;
     const hs = await getGameHighScore(user.id);
     setHighScore(hs);
+    const gs = await getGameStatus(user.id);
+    setGameStatus(gs);
   }, [user]);
 
   useEffect(() => { loadHigh(); }, [loadHigh]);
 
   const startGame = async () => {
     if (!user) return;
+    if (!gameStatus.canPlay) {
+      toast.error(`Come back in ${gameStatus.hoursLeft}h to play again`);
+      return;
+    }
     setGameState('watching_ad');
     const adResult = await showRandomAd();
     if (!adResult.success) {
@@ -87,17 +94,20 @@ export default function MiniGame() {
     if (gameState !== 'ended' || !user) return;
     const pairs = tiles.filter(t => t.matched).length / 2;
     const timeBonus = timeLeft;
-    const hiveEarned = Math.min(50, pairs * 3 + Math.floor(timeBonus / 4));
-    if (hiveEarned > 0) {
-      recordGameReward(user.id, pairs * 10 + timeBonus, hiveEarned).then(res => {
-        if (res.success) {
-          showReward(hiveEarned, 'Game Over!', `Score: ${pairs * 10 + timeBonus} | +${hiveEarned} Hive`, '🎮');
-          toast.success(`+${hiveEarned} Hive earned!`, { icon: '🎮' });
-          refreshUser();
-          loadHigh();
-        }
-      });
-    }
+    const finalScore = pairs * 10 + timeBonus;
+    // Server assigns random 5-20 reward
+    recordGameReward(user.id, finalScore, 0).then(res => {
+      if (res.success) {
+        const match = res.message.match(/(\d+)/);
+        const hiveEarned = match ? parseInt(match[1]) : 0;
+        showReward(hiveEarned, 'Game Over!', `Score: ${finalScore} | +${hiveEarned} Hive`, '🎮');
+        toast.success(`+${hiveEarned} Hive earned!`, { icon: '🎮' });
+        refreshUser();
+        loadHigh();
+      } else {
+        toast.error(res.message);
+      }
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState]);
 
@@ -138,7 +148,7 @@ export default function MiniGame() {
           <Gamepad2 size={24} className="text-hive-gold" />
           <h2 className="text-white font-black text-xl">Memory Match</h2>
         </div>
-        <p className="text-white/40 text-xs mb-4">Match pairs of Hive values. Earn up to 50 Hive per game!</p>
+        <p className="text-white/40 text-xs mb-4">Match pairs to earn 5-20 Hive! One game every 2 hours.</p>
 
         {highScore > 0 && (
           <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-white/[0.06] rounded-full mb-4">
@@ -147,7 +157,14 @@ export default function MiniGame() {
           </div>
         )}
 
-        {gameState === 'idle' && (
+        {gameState === 'idle' && !gameStatus.canPlay && (
+          <div className="flex items-center justify-center gap-2 text-white/50 py-4">
+            <Clock size={18} />
+            <span className="font-semibold text-sm">Next game in {gameStatus.hoursLeft}h</span>
+          </div>
+        )}
+
+        {gameState === 'idle' && gameStatus.canPlay && (
           <motion.button whileTap={{ scale: 0.95 }} onClick={startGame} className="btn-hive w-full py-4 text-lg font-black rounded-2xl flex items-center justify-center gap-2">
             <Play size={20} /> Watch Ad & Play
           </motion.button>
@@ -231,7 +248,8 @@ export default function MiniGame() {
           <li>• Watch an ad to start the game</li>
           <li>• Flip cards to find matching Hive values</li>
           <li>• Match all pairs before time runs out</li>
-          <li>• Earn up to 50 Hive per game (more pairs + time bonus)</li>
+          <li>• Earn 5-20 Hive per game (random reward)</li>
+          <li>• One game every 2 hours</li>
         </ul>
       </GlassCard>
     </div>

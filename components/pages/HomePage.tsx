@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
-import { Bell, Gift, Trophy, Megaphone, ChevronRight, Wallet, PlayCircle, CheckSquare, Users, Zap, Copy, ExternalLink, Pickaxe, Timer, CheckCircle2, AlertCircle, RefreshCw, XCircle, Shield } from 'lucide-react';
+import { Bell, Gift, Trophy, Megaphone, ChevronRight, Wallet, PlayCircle, CheckSquare, Users, Zap, Copy, ExternalLink, Pickaxe, Timer, CheckCircle2, AlertCircle, RefreshCw, XCircle, Shield, Dices, Gamepad2 } from 'lucide-react';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import HiveBalance from '@/components/ui/HiveBalance';
@@ -257,6 +257,8 @@ export default function HomePage() {
     { icon: Wallet, label: 'Withdraw', href: '/wallet', color: 'text-blue-400', bg: 'bg-blue-400/10' },
     { icon: Trophy, label: 'Leaderboard', href: '/leaderboard', color: 'text-hive-gold', bg: 'bg-hive-gold/10' },
     { icon: Gift, label: 'Giveaway', href: '/giveaway', color: 'text-pink-400', bg: 'bg-pink-400/10' },
+    { icon: Dices, label: 'Spin Wheel', href: '/giveaway', color: 'text-orange-400', bg: 'bg-orange-400/10' },
+    { icon: Gamepad2, label: 'Mini Game', href: '/giveaway', color: 'text-cyan-400', bg: 'bg-cyan-400/10' },
   ];
 
   const txTypeColor: Record<string, string> = {

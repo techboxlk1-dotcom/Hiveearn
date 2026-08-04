@@ -1441,6 +1441,7 @@ function AdminSettings({ adminId }: { adminId: string }) {
     { key: 'auto_withdraw_wallet', label: 'Auto Withdraw Trust Wallet', placeholder: '0x...' },
     { key: 'daily_reminder_enabled', label: 'Daily Reminders Enabled', placeholder: 'true/false' },
     { key: 'daily_reminder_interval_hours', label: 'Reminder Interval (hours)', placeholder: 'e.g. 4' },
+    { key: 'mining_rate_per_hour', label: 'Mining Rate (Hive/hour)', placeholder: 'e.g. 20' },
     { key: 'broadcast_to_channel', label: 'Broadcast to Channel', placeholder: 'true/false' },
   ];
 

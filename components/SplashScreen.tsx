@@ -73,16 +73,21 @@ export default function SplashScreen() {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.6 }}
-          className="flex items-center gap-6 text-white/40 text-xs font-medium"
+          className="flex items-center gap-4 text-white/40 text-xs font-medium flex-wrap justify-center max-w-xs"
         >
-          {['Watch Ads', 'Do Tasks', 'Refer & Earn'].map((label) => (
-            <div key={label} className="flex flex-col items-center gap-1">
-              <div className="w-8 h-8 rounded-lg bg-hive-gold/10 border border-hive-gold/20 flex items-center justify-center">
-                <span className="text-hive-gold text-base">
-                  {label === 'Watch Ads' ? '▶' : label === 'Do Tasks' ? '✓' : '👥'}
-                </span>
+          {[
+            { label: 'Watch Ads', icon: '▶' },
+            { label: 'Daily Bonus', icon: '🎁' },
+            { label: 'Spin', icon: '🎡' },
+            { label: 'Mini Game', icon: '🎮' },
+            { label: 'Mining', icon: '⛏️' },
+            { label: 'Giveaway', icon: '🎉' },
+          ].map((item) => (
+            <div key={item.label} className="flex flex-col items-center gap-1">
+              <div className="w-9 h-9 rounded-lg bg-hive-gold/10 border border-hive-gold/20 flex items-center justify-center">
+                <span className="text-hive-gold text-sm">{item.icon}</span>
               </div>
-              <span>{label}</span>
+              <span className="text-[10px]">{item.label}</span>
             </div>
           ))}
         </motion.div>
@@ -130,56 +135,59 @@ export default function SplashScreen() {
 function BeeLogoSVG() {
   return (
     <svg viewBox="0 0 120 120" width="120" height="120" xmlns="http://www.w3.org/2000/svg">
-      {/* Circle background */}
-      <circle cx="60" cy="60" r="58" fill="#1A1A0A" stroke="#F5C518" strokeWidth="2" />
-      {/* Honeycomb pattern */}
-      <circle cx="60" cy="60" r="55" fill="url(#hexPattern)" opacity="0.3" />
       <defs>
-        <pattern id="hexPattern" width="16" height="14" patternUnits="userSpaceOnUse">
-          <polygon points="8,0 16,4 16,10 8,14 0,10 0,4" fill="none" stroke="#F5C518" strokeWidth="0.3" opacity="0.4" />
+        <radialGradient id="bgGrad" cx="50%" cy="40%" r="60%">
+          <stop offset="0%" stopColor="#2A2A10" />
+          <stop offset="100%" stopColor="#0A0A0A" />
+        </radialGradient>
+        <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#FFD54F" />
+          <stop offset="50%" stopColor="#F5C518" />
+          <stop offset="100%" stopColor="#E5B000" />
+        </linearGradient>
+        <linearGradient id="wingGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="rgba(255,255,255,0.85)" />
+          <stop offset="100%" stopColor="rgba(255,255,255,0.3)" />
+        </linearGradient>
+        <pattern id="hexPattern" width="14" height="12" patternUnits="userSpaceOnUse">
+          <polygon points="7,0 14,3.5 14,8.5 7,12 0,8.5 0,3.5" fill="none" stroke="#F5C518" strokeWidth="0.4" opacity="0.5" />
         </pattern>
       </defs>
+      {/* Circle background */}
+      <circle cx="60" cy="60" r="58" fill="url(#bgGrad)" stroke="#F5C518" strokeWidth="2.5" />
+      {/* Honeycomb pattern */}
+      <circle cx="60" cy="60" r="55" fill="url(#hexPattern)" opacity="0.25" />
+      {/* Wings (behind body) */}
+      <ellipse cx="36" cy="50" rx="18" ry="11" fill="url(#wingGrad)" stroke="rgba(255,255,255,0.6)" strokeWidth="0.5" transform="rotate(-25,36,50)" />
+      <ellipse cx="84" cy="50" rx="18" ry="11" fill="url(#wingGrad)" stroke="rgba(255,255,255,0.6)" strokeWidth="0.5" transform="rotate(25,84,50)" />
       {/* Bee body */}
-      <ellipse cx="60" cy="65" rx="22" ry="28" fill="#F5C518" />
-      <ellipse cx="60" cy="65" rx="22" ry="28" fill="url(#beeStripes)" />
-      <defs>
-        <linearGradient id="beeStripes" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#F5C518" />
-          <stop offset="30%" stopColor="#1A1A1A" />
-          <stop offset="50%" stopColor="#F5C518" />
-          <stop offset="70%" stopColor="#1A1A1A" />
-          <stop offset="100%" stopColor="#F5C518" />
-        </linearGradient>
-      </defs>
+      <ellipse cx="60" cy="64" rx="22" ry="26" fill="url(#bodyGrad)" />
+      {/* Body stripes */}
+      <path d="M38 58 Q60 53 82 58" stroke="#1A1A1A" strokeWidth="3" fill="none" strokeLinecap="round" opacity="0.85" />
+      <path d="M38 68 Q60 63 82 68" stroke="#1A1A1A" strokeWidth="3" fill="none" strokeLinecap="round" opacity="0.85" />
+      <path d="M38 78 Q60 73 82 78" stroke="#1A1A1A" strokeWidth="3" fill="none" strokeLinecap="round" opacity="0.85" />
       {/* Head */}
-      <circle cx="60" cy="40" r="16" fill="#F5C518" />
+      <circle cx="60" cy="38" r="15" fill="url(#bodyGrad)" />
       {/* Eyes */}
-      <circle cx="55" cy="38" r="4" fill="white" />
-      <circle cx="65" cy="38" r="4" fill="white" />
-      <circle cx="56" cy="38" r="2.5" fill="#1A1A1A" />
-      <circle cx="66" cy="38" r="2.5" fill="#1A1A1A" />
-      <circle cx="56.8" cy="37.2" r="0.8" fill="white" />
-      <circle cx="66.8" cy="37.2" r="0.8" fill="white" />
-      {/* Wink right eye */}
-      <path d="M63 36 Q65 35 67 36" stroke="#1A1A1A" strokeWidth="1.5" fill="none" />
+      <circle cx="55" cy="36" r="3.5" fill="#1A1A1A" />
+      <circle cx="65" cy="36" r="3.5" fill="#1A1A1A" />
+      <circle cx="56" cy="35" r="1.2" fill="white" />
+      <circle cx="66" cy="35" r="1.2" fill="white" />
       {/* Smile */}
-      <path d="M54 44 Q60 48 66 44" stroke="#1A1A1A" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+      <path d="M54 43 Q60 47 66 43" stroke="#1A1A1A" strokeWidth="1.5" fill="none" strokeLinecap="round" />
       {/* Antennae */}
-      <line x1="55" y1="25" x2="48" y2="15" stroke="#1A1A1A" strokeWidth="1.5" />
-      <line x1="65" y1="25" x2="72" y2="15" stroke="#1A1A1A" strokeWidth="1.5" />
-      <circle cx="48" cy="14" r="2.5" fill="#1A1A1A" />
-      <circle cx="72" cy="14" r="2.5" fill="#1A1A1A" />
-      {/* Wings */}
-      <ellipse cx="38" cy="52" rx="16" ry="10" fill="rgba(255,255,255,0.7)" stroke="rgba(255,255,255,0.9)" strokeWidth="0.5" transform="rotate(-20,38,52)" />
-      <ellipse cx="82" cy="52" rx="16" ry="10" fill="rgba(255,255,255,0.7)" stroke="rgba(255,255,255,0.9)" strokeWidth="0.5" transform="rotate(20,82,52)" />
+      <path d="M54 25 Q50 18 46 14" stroke="#1A1A1A" strokeWidth="2" fill="none" strokeLinecap="round" />
+      <path d="M66 25 Q70 18 74 14" stroke="#1A1A1A" strokeWidth="2" fill="none" strokeLinecap="round" />
+      <circle cx="46" cy="14" r="3" fill="#F5C518" stroke="#1A1A1A" strokeWidth="0.5" />
+      <circle cx="74" cy="14" r="3" fill="#F5C518" stroke="#1A1A1A" strokeWidth="0.5" />
       {/* USDT coin */}
-      <circle cx="85" cy="70" r="14" fill="#26A17B" stroke="#1FA46B" strokeWidth="1" />
-      <text x="85" y="75" textAnchor="middle" fill="white" fontSize="14" fontWeight="bold">₮</text>
+      <circle cx="88" cy="72" r="12" fill="#26A17B" stroke="#1FA46B" strokeWidth="1" />
+      <text x="88" y="77" textAnchor="middle" fill="white" fontSize="13" fontWeight="bold">{"\u20AE"}</text>
       {/* Thumbs up */}
-      <path d="M38 75 Q35 70 36 65 L40 65 Q40 60 44 58 L46 65 Q48 65 48 68 L48 78 Q44 80 38 75Z" fill="#F5C518" stroke="#E5B000" strokeWidth="0.5" />
+      <path d="M32 72 Q29 68 30 64 L34 64 Q34 60 38 58 L40 64 Q42 64 42 67 L42 75 Q38 77 32 72Z" fill="#F5C518" stroke="#E5B000" strokeWidth="0.5" />
       {/* Text */}
-      <text x="60" y="103" textAnchor="middle" fill="white" fontSize="10" fontWeight="900" fontFamily="Arial">Hive</text>
-      <text x="60" y="114" textAnchor="middle" fill="#F5C518" fontSize="10" fontWeight="900" fontFamily="Arial">Earn</text>
+      <text x="60" y="103" textAnchor="middle" fill="white" fontSize="9" fontWeight="900" fontFamily="Arial">Hive</text>
+      <text x="60" y="114" textAnchor="middle" fill="#F5C518" fontSize="9" fontWeight="900" fontFamily="Arial">Earn</text>
     </svg>
   );
 }

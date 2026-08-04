@@ -472,6 +472,11 @@ export async function adminDeleteVisitWebsite(adminId: string, id: string): Prom
 
 const HIVE_PER_HOUR = 20;
 
+async function getMiningRate(): Promise<number> {
+  const settings = await getAppSettings();
+  return parseInt(settings['mining_rate_per_hour'] ?? '20') || 20;
+}
+
 export async function startMining(userId: string): Promise<{ success: boolean; message: string; startedAt: string | null }> {
   const guard = await checkNotSuspended(userId);
   if (!guard.ok) return { success: false, message: guard.message, startedAt: null };
@@ -502,7 +507,7 @@ export async function claimMining(userId: string): Promise<{ success: boolean; h
   }
 
   const hoursToCredit = Math.floor(elapsedHours);
-  const hiveEarned = hoursToCredit * HIVE_PER_HOUR;
+  const hiveEarned = hoursToCredit * (await getMiningRate());
 
   await supabase.from('users').update({
     hive_balance: user.hive_balance + hiveEarned,
@@ -1017,23 +1022,24 @@ export async function approveWithdrawal(adminId: string, withdrawalId: string, t
   // Notify user with net balance emoji and proper buttons
   const { data: user } = await supabase.from('users').select('telegram_id, hive_balance, first_name, username').eq('id', wd.user_id).maybeSingle();
   if (user) {
+    const userDisplay = `${user.first_name}${(user as { username?: string }).username ? ` (@${(user as { username?: string }).username})` : ''}`;
     await supabase.functions.invoke('send-bot-message', {
       body: {
         chat_id: user.telegram_id,
-        text: `✅ <b>Withdrawal Approved!</b>\n\nID: <code>${wd.withdraw_id ?? ''}</code>\nAmount: <b>${wd.net_amount.toFixed(6)} USDT</b>\nWallet: <code>${wd.wallet_address}</code>\n\n🔗 TXID: <code>${txid}</code>\n\n💰 Net Balance: ${user.hive_balance.toFixed(2)} 🍯 Hive`,
+        text: `✅ <b>Payment Sent!</b>\n\n━━━━━━━━━━━━━━━\n👤 <b>${userDisplay}</b>\n💵 <b>Amount:</b> ${wd.net_amount.toFixed(6)} USDT\n📤 <b>ID:</b> <code>${wd.withdraw_id ?? withdrawalId.slice(0, 8)}</code>\n━━━━━━━━━━━━━━━\n\n🔗 <b>TXID:</b> <code>${txid}</code>\n\n<a href="https://bscscan.com/tx/${txid}">📊 View on BSCScan</a>`,
         payment_type: 'approved',
         txid: txid
       }
     });
   }
 
-  // Notify payment channel with proper buttons
+  // Notify payment channel with proper buttons (channel uses URL buttons only)
   const paymentChannel = (settings['payment_channel'] ?? 'hiveearnpayment').replace(/^@/, '');
   const userDisplay = user ? `${user.first_name}${(user as { username?: string }).username ? ` (@${(user as { username?: string }).username})` : ''}` : 'User';
   await supabase.functions.invoke('send-bot-message', {
     body: {
       chat_id: `@${paymentChannel}`,
-      text: `💸 <b>Payment Sent</b>\n\n👤 <b>User</b> - ${userDisplay}\n💵 <b>Amount</b> - ${wd.hive_amount} H = ${wd.usdt_amount.toFixed(6)} USDT\n💸 <b>Fee</b> - ${wd.fee_amount.toFixed(6)} USDT\n💰 <b>USDT Net</b> - ${wd.net_amount.toFixed(6)} USDT\n✅ <b>Status</b> - Success\n🔗 <b>Tx ID</b> - <code>${txid}</code>`,
+      text: `✅ <b>Payment Sent</b>\n\n👤 <b>${userDisplay}</b>\n💵 <b>Amount:</b> ${wd.net_amount.toFixed(6)} USDT\n📤 <b>ID:</b> <code>${wd.withdraw_id ?? withdrawalId.slice(0, 8)}</code>\n🔗 <b>TXID:</b> <code>${txid}</code>\n\n<a href="https://bscscan.com/tx/${txid}">📊 View on BSCScan</a>`,
       payment_type: 'approved',
       txid: txid
     }
@@ -1544,9 +1550,19 @@ export async function generateMonthlyLeaderboard(adminId: string): Promise<{ suc
 
 // ─── Spin Wheel ──────────────────────────────────────────────────────────────
 
-const SPIN_COOLDOWN_HOURS = 12;
+const SPIN_DAILY_LIMIT = 2;
 
-export async function getSpinStatus(userId: string): Promise<{ canSpin: boolean; hoursLeft: number; lastSpinAt: string | null; totalSpins: number }> {
+export async function getSpinStatus(userId: string): Promise<{ canSpin: boolean; hoursLeft: number; lastSpinAt: string | null; totalSpins: number; spinsLeftToday: number }> {
+  // Count today's spins
+  const today = new Date();
+  const todayStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())).toISOString();
+
+  const { count: todayCount } = await supabase
+    .from('spin_wheel_plays')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .gte('played_at', todayStart);
+
   const { data: lastSpin } = await supabase
     .from('spin_wheel_plays')
     .select('played_at')
@@ -1555,18 +1571,18 @@ export async function getSpinStatus(userId: string): Promise<{ canSpin: boolean;
     .limit(1)
     .maybeSingle();
 
-  const { count } = await supabase
+  const { count: totalCount } = await supabase
     .from('spin_wheel_plays')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', userId);
 
-  if (!lastSpin) return { canSpin: true, hoursLeft: 0, lastSpinAt: null, totalSpins: count ?? 0 };
+  const spinsLeftToday = Math.max(0, SPIN_DAILY_LIMIT - (todayCount ?? 0));
 
-  const elapsedMs = Date.now() - new Date(lastSpin.played_at).getTime();
-  const elapsedHours = elapsedMs / (1000 * 60 * 60);
-  const hoursLeft = Math.max(0, Math.ceil(SPIN_COOLDOWN_HOURS - elapsedHours));
+  // Calculate hours left until next day reset
+  const tomorrow = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1, 0, 0, 0));
+  const hoursLeft = Math.ceil((tomorrow.getTime() - Date.now()) / (1000 * 60 * 60));
 
-  return { canSpin: hoursLeft === 0, hoursLeft, lastSpinAt: lastSpin.played_at, totalSpins: count ?? 0 };
+  return { canSpin: spinsLeftToday > 0, hoursLeft, lastSpinAt: lastSpin?.played_at ?? null, totalSpins: totalCount ?? 0, spinsLeftToday };
 }
 
 export async function playSpinWheel(userId: string): Promise<{ success: boolean; hive: number; message: string }> {
@@ -1574,7 +1590,7 @@ export async function playSpinWheel(userId: string): Promise<{ success: boolean;
   if (!guard.ok) return { success: false, hive: 0, message: guard.message };
 
   const status = await getSpinStatus(userId);
-  if (!status.canSpin) return { success: false, hive: 0, message: `Come back in ${status.hoursLeft}h to spin again` };
+  if (!status.canSpin) return { success: false, hive: 0, message: `Daily spin limit reached. Come back in ${status.hoursLeft}h` };
 
   // Weighted random: 2-20 Hive, heavily weighted toward low values
   const weights = [30, 25, 20, 12, 8, 3, 1, 1]; // 2,3,4,5,8,12,15,20
@@ -1596,23 +1612,55 @@ export async function playSpinWheel(userId: string): Promise<{ success: boolean;
 
 // ─── Mini Game ───────────────────────────────────────────────────────────────
 
+const GAME_COOLDOWN_HOURS = 2;
+
+export async function getGameStatus(userId: string): Promise<{ canPlay: boolean; hoursLeft: number; lastPlayedAt: string | null; totalGames: number }> {
+  const { data: lastGame } = await supabase
+    .from('transactions')
+    .select('created_at')
+    .eq('user_id', userId)
+    .eq('type', 'game')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { count } = await supabase
+    .from('transactions')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('type', 'game');
+
+  if (!lastGame) return { canPlay: true, hoursLeft: 0, lastPlayedAt: null, totalGames: count ?? 0 };
+
+  const elapsedMs = Date.now() - new Date(lastGame.created_at).getTime();
+  const elapsedHours = elapsedMs / (1000 * 60 * 60);
+  const hoursLeft = Math.max(0, Math.ceil(GAME_COOLDOWN_HOURS - elapsedHours));
+
+  return { canPlay: hoursLeft === 0, hoursLeft, lastPlayedAt: lastGame.created_at, totalGames: count ?? 0 };
+}
+
 export async function recordGameReward(userId: string, score: number, hiveEarned: number): Promise<{ success: boolean; message: string }> {
   const guard = await checkNotSuspended(userId);
   if (!guard.ok) return { success: false, message: guard.message };
 
-  if (hiveEarned <= 0 || hiveEarned > 50) return { success: false, message: 'Invalid reward amount' };
+  // Check 2h cooldown
+  const status = await getGameStatus(userId);
+  if (!status.canPlay) return { success: false, message: `Come back in ${status.hoursLeft}h to play again` };
+
+  // Random reward between 5-20 Hive
+  const reward = Math.floor(Math.random() * 16) + 5; // 5-20 inclusive
 
   await supabase.from('transactions').insert({
     user_id: userId,
     type: 'game',
-    amount: hiveEarned,
+    amount: reward,
     description: `🎮 Mini Game — Score: ${score}`,
     status: 'completed',
   });
-  await creditHive(userId, hiveEarned, 'game', `🎮 Mini Game reward (Score: ${score})`);
-  await createNotification(userId, 'reward', '🎮 Game Reward!', `You earned ${hiveEarned} 🍯 Hive from the mini game!`);
+  await creditHive(userId, reward, 'game', `🎮 Mini Game reward (Score: ${score})`);
+  await createNotification(userId, 'reward', '🎮 Game Reward!', `You earned ${reward} 🍯 Hive from the mini game!`);
 
-  return { success: true, message: `+${hiveEarned} Hive earned!` };
+  return { success: true, message: `+${reward} Hive earned!` };
 }
 
 export async function getGameHighScore(userId: string): Promise<number> {

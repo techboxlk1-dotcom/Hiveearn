@@ -25,7 +25,7 @@ export default function SpinWheel() {
   const { user, refreshUser } = useUser();
   const { showRandomAd } = useAds();
   const { showReward } = useRewardPopup();
-  const [status, setStatus] = useState<{ canSpin: boolean; hoursLeft: number; totalSpins: number }>({ canSpin: false, hoursLeft: 0, totalSpins: 0 });
+  const [status, setStatus] = useState<{ canSpin: boolean; hoursLeft: number; totalSpins: number; spinsLeftToday: number }>({ canSpin: false, hoursLeft: 0, totalSpins: 0, spinsLeftToday: 2 });
   const [spinning, setSpinning] = useState(false);
   const [rotation, setRotation] = useState(0);
   const [wonAmount, setWonAmount] = useState<number | null>(null);
@@ -102,10 +102,12 @@ export default function SpinWheel() {
         </motion.div>
 
         <h2 className="text-white font-black text-xl mb-1">Spin the Wheel</h2>
-        <p className="text-white/40 text-xs mb-4">Win 2-20 Hive per spin! Every 12 hours.</p>
+        <p className="text-white/40 text-xs mb-4">Win 2-20 Hive per spin! 2 spins per day.</p>
 
         <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-white/[0.06] rounded-full mb-4">
-          <span className="text-white/40 text-xs">Total spins: <span className="text-hive-gold font-bold">{status.totalSpins}</span></span>
+          <span className="text-white/40 text-xs">Spins left today: <span className="text-hive-gold font-bold">{status.spinsLeftToday}</span> / 2</span>
+          <span className="text-white/20">|</span>
+          <span className="text-white/40 text-xs">Total: <span className="text-hive-gold font-bold">{status.totalSpins}</span></span>
         </div>
 
         <AnimatePresence mode="wait">
@@ -139,7 +141,7 @@ export default function SpinWheel() {
             >
               <div className="flex items-center justify-center gap-2 text-white/50">
                 <Clock size={18} />
-                <span className="font-semibold">Next spin in {status.hoursLeft}h</span>
+                <span className="font-semibold">Daily limit reached. Reset in {status.hoursLeft}h</span>
               </div>
             </motion.div>
           )}

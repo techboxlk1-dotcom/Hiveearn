@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import { getActiveGiveaways, getAllGiveaways, getEndedGiveaways, getGiveawayWinHistory, participateGiveaway, getGiveawayParticipation, getBabyHiveBalance, type Giveaway } from '@/lib/api';
+import { useAds } from '@/hooks/useAds';
 import type { GiveawayWin } from '@/lib/api';
 import { toast } from 'sonner';
 import { useRewardPopup } from '@/components/ui/RewardPopup';
@@ -16,9 +17,48 @@ import MiniGame from './MiniGame';
 
 type GiveawayTab = 'available' | 'all' | 'ended' | 'wins' | 'earn' | 'spin' | 'game';
 
+// Giveaway image component with ibb.co URL handling
+function GiveawayImage({ src, alt }: { src: string; alt: string }) {
+  const [imageError, setImageError] = useState(false);
+  let finalUrl = src;
+
+  if (finalUrl.includes('ibb.co')) {
+    const shortMatch = finalUrl.match(/^https?:\/\/ibb\.co\/([a-zA-Z0-9]+)$/i);
+    if (shortMatch) {
+      finalUrl = `https://i.ibb.co/${shortMatch[1]}/image.png`;
+    } else if (finalUrl.includes('//ibb.co/') && !finalUrl.includes('//i.ibb.co')) {
+      finalUrl = finalUrl.replace('//ibb.co/', '//i.ibb.co/');
+    }
+  }
+
+  if (imageError) {
+    return <div className="w-full h-full bg-hive-gold/10 flex items-center justify-center"><Gift size={32} className="text-hive-gold/40" /></div>;
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      key={finalUrl}
+      src={finalUrl}
+      alt={alt}
+      className="w-full h-full object-cover"
+      onError={() => {
+        if (finalUrl.endsWith('.png')) {
+          const jpgUrl = finalUrl.replace('.png', '.jpg');
+          const img = document.querySelector(`img[src="${finalUrl}"]`) as HTMLImageElement;
+          if (img) img.src = jpgUrl;
+          return;
+        }
+        setImageError(true);
+      }}
+    />
+  );
+}
+
 export default function GiveawayPage() {
   const { user, refreshUser } = useUser();
   const { showReward } = useRewardPopup();
+  const { showRandomAd } = useAds();
   const [activeTab, setActiveTab] = useState<GiveawayTab>('available');
   const [giveaways, setGiveaways] = useState<Giveaway[]>([]);
   const [participation, setParticipation] = useState<Record<string, boolean>>({});
@@ -27,6 +67,7 @@ export default function GiveawayPage() {
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState<string | null>(null);
   const [selectedAmount, setSelectedAmount] = useState<Record<string, number>>({});
+  const [adPlaying, setAdPlaying] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -82,6 +123,14 @@ export default function GiveawayPage() {
     }
     setJoining(giveaway.id);
     try {
+      // Watch ad first (2 networks random)
+      setAdPlaying(true);
+      const adResult = await showRandomAd();
+      setAdPlaying(false);
+      if (!adResult.success) {
+        toast.error('Ad not completed. Watch the ad to join giveaway.');
+        return;
+      }
       const res = await participateGiveaway(user.id, giveaway.id, amount);
       if (res.success) {
         toast.success('Successfully joined giveaway!');
@@ -118,8 +167,7 @@ export default function GiveawayPage() {
         <GlassCard className="overflow-hidden" animate={false}>
           {g.image_url && (
             <div className="relative h-32 overflow-hidden">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={g.image_url} alt={g.title} className="w-full h-full object-cover" />
+              <GiveawayImage src={g.image_url} alt={g.title} />
               <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0A] to-transparent" />
             </div>
           )}
@@ -186,7 +234,7 @@ export default function GiveawayPage() {
                   ) : (
                     <Gift size={16} />
                   )}
-                  {babyHiveBalance < g.min_baby_hive ? 'Not enough Baby Hive' : `Add ${amount} 🍼 More`}
+                  {adPlaying ? 'Loading Ad...' : babyHiveBalance < g.min_baby_hive ? 'Not enough Baby Hive' : `Add ${amount} 🍼 More`}
                 </motion.button>
               </>
             ) : (
@@ -217,7 +265,7 @@ export default function GiveawayPage() {
                   ) : (
                     <Gift size={16} />
                   )}
-                  {babyHiveBalance < g.min_baby_hive ? 'Not enough Baby Hive' : `Join with ${amount} 🍼`}
+                  {adPlaying ? 'Loading Ad...' : babyHiveBalance < g.min_baby_hive ? 'Not enough Baby Hive' : `Join with ${amount} 🍼`}
                 </motion.button>
               </>
             )}
