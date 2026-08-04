@@ -25,7 +25,7 @@ const USDT_ABI = [
 const MIN_BNB_FOR_GAS = ethers.parseEther("0.0005");
 const GAS_LIMIT = 100000n;
 // Use legacy gas price — BSC public RPC nodes do NOT support EIP-1559
-const GAS_PRICE = ethers.parseUnits("1", "gwei");
+const GAS_PRICE = ethers.parseUnits("3", "gwei");
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {

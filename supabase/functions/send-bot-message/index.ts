@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const BOT_TOKEN = Deno.env.get("BOT_TOKEN") ?? "";
 const MINI_APP_URL = Deno.env.get("MINI_APP_URL") ?? "https://t.me/Hiveearnbot/play";
+const MINI_APP_STARTAPP_URL = "https://t.me/Hiveearnbot/play?startapp";
 const ADMIN_CHAT_ID = Deno.env.get("ADMIN_CHAT_ID") ?? "5419054691";
 const APP_URL = Deno.env.get("APP_URL") ?? "";
 const BANNER_PHOTO = Deno.env.get("BANNER_PHOTO") ?? "";
@@ -44,7 +45,7 @@ function getUserPaymentKeyboard(txid: string) {
 function getChannelPaymentKeyboard(txid: string) {
   return {
     inline_keyboard: [
-      [{ text: "🐝 Open Mini App", url: MINI_APP_URL }],
+      [{ text: "🐝 Open Mini App", url: MINI_APP_STARTAPP_URL }],
       [{ text: "View Transaction", url: `https://bscscan.com/tx/${txid}` }],
     ],
   };
@@ -142,7 +143,7 @@ Deno.serve(async (req: Request) => {
         customKeyboard = {
           inline_keyboard: [
             [{ text: button_name, url: button_url }],
-            [{ text: "🐝 Open Hive Earn", url: MINI_APP_URL }],
+            [{ text: "🐝 Open Hive Earn", url: MINI_APP_STARTAPP_URL }],
           ],
         };
       } else {
@@ -162,7 +163,7 @@ Deno.serve(async (req: Request) => {
         let keyboard = customKeyboard;
         if (!keyboard && include_app_button) {
           keyboard = isChannel
-            ? { inline_keyboard: [[{ text: "🐝 Open Hive Earn", url: MINI_APP_URL }]] }
+            ? { inline_keyboard: [[{ text: "🐝 Open Hive Earn", url: MINI_APP_STARTAPP_URL }]] }
             : getMainKeyboard();
         }
         await sendPhoto(chat_id, photo, text, keyboard);
@@ -176,7 +177,7 @@ Deno.serve(async (req: Request) => {
     let keyboard = customKeyboard;
     if (!keyboard && include_app_button) {
       keyboard = isChannel
-        ? { inline_keyboard: [[{ text: "🐝 Open Hive Earn", url: MINI_APP_URL }]] }
+        ? { inline_keyboard: [[{ text: "🐝 Open Hive Earn", url: MINI_APP_STARTAPP_URL }]] }
         : getMainKeyboard();
     }
     const result = await sendMessage(chat_id, text, keyboard, parse_mode);
