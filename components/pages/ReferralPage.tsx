@@ -91,9 +91,9 @@ export default function ReferralPage() {
   };
 
   const steps = [
-    { hive: 25, label: 'Friend joins', sub: 'Instant reward when they sign up', done: true },
-    { hive: 50, label: 'Watches 10 ads', sub: 'After first 10 ad watches', done: false },
-    { hive: 75, label: 'Day 2 milestone', sub: '10 more ads on their 2nd day', done: false },
+    { hive: 250, label: 'Friend joins', sub: 'Instant reward when they sign up', done: true },
+    { hive: 500, label: 'Watches 10 ads', sub: 'After first 10 ad watches', done: false },
+    { hive: 750, label: 'Day 2 milestone', sub: '10 more ads on their 2nd day', done: false },
   ];
 
   const statusConfig = {
@@ -198,7 +198,7 @@ export default function ReferralPage() {
               <div className="pb-4">
                 <div className="flex items-center gap-2">
                   <p className="text-white font-semibold text-sm">{step.label}</p>
-                  <p className="text-hive-gold font-black text-sm">+{step.hive} coins</span>
+                  <span className="text-hive-gold font-black text-sm">+{step.hive} coins</span>
                 </div>
                 <p className="text-white/40 text-xs mt-0.5">{step.sub}</p>
               </div>

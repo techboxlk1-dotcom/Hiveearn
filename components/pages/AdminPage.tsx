@@ -49,7 +49,6 @@ export default function AdminPage() {
     { id: 'ad_messages', label: 'Ad Messages', icon: Megaphone },
     { id: 'ads', label: 'Ad Providers', icon: Tv },
     { id: 'visit_sites', label: 'Visit Sites', icon: Globe },
-    { id: 'giveaways', label: 'Giveaways', icon: Gift },
     { id: 'leaderboard', label: 'Leaderboard', icon: Trophy },
     { id: 'settings', label: 'Settings', icon: Settings },
     { id: 'fraud', label: 'Fraud Logs', icon: Shield },
@@ -105,7 +104,6 @@ export default function AdminPage() {
             {section === 'ad_messages' && <AdminAdMessages adminId={user.id} />}
             {section === 'ads' && <AdminAds adminId={user.id} />}
             {section === 'visit_sites' && <AdminVisitSites adminId={user.id} />}
-            {section === 'giveaways' && <AdminGiveaways adminId={user.id} />}
             {section === 'leaderboard' && <AdminLeaderboard adminId={user.id} />}
             {section === 'settings' && <AdminSettings adminId={user.id} />}
             {section === 'fraud' && <AdminFraud />}
@@ -142,7 +140,7 @@ function AdminDashboard({ stats }: { stats: { totalUsers: number; pendingWithdra
   const cards = [
     { label: 'Total Users', value: stats.totalUsers.toLocaleString(), icon: Users, color: 'text-blue-400', bg: 'bg-blue-400/10' },
     { label: 'Pending Withdrawals', value: stats.pendingWithdrawals, icon: DollarSign, color: 'text-yellow-400', bg: 'bg-yellow-400/10' },
-    { label: 'Total Hive Issued', value: formatHive(dbStats.totalHive), icon: BarChart2, color: 'text-hive-gold', bg: 'bg-hive-gold/10' },
+    { label: 'Total Coins Issued', value: formatHive(dbStats.totalHive), icon: BarChart2, color: 'text-hive-gold', bg: 'bg-hive-gold/10' },
     { label: 'New Today', value: dbStats.todayUsers, icon: Users, color: 'text-green-400', bg: 'bg-green-400/10' },
   ];
 
@@ -273,13 +271,13 @@ function AdminUsers({ adminId }: { adminId: string }) {
           <div className="pt-2 border-t border-white/[0.06]">
             <p className="text-white/40 text-[10px] font-semibold uppercase mb-2">Earnings Breakdown</p>
             <div className="space-y-1 text-xs">
-              <div className="flex justify-between"><span className="text-white/40">Ads</span><span className="text-hive-gold font-bold">+{(activity as any).adEarnings?.toFixed(1) || 0}H</span></div>
-              <div className="flex justify-between"><span className="text-white/40">Tasks</span><span className="text-green-400 font-bold">+{(activity as any).taskEarnings?.toFixed(1) || 0}H</span></div>
-              <div className="flex justify-between"><span className="text-white/40">Daily Bonus</span><span className="text-blue-400 font-bold">+{(activity as any).dailyBonusEarnings?.toFixed(1) || 0}H</span></div>
-              <div className="flex justify-between"><span className="text-white/40">Reward Codes</span><span className="text-purple-400 font-bold">+{(activity as any).rewardCodeEarnings?.toFixed(1) || 0}H</span></div>
-              <div className="flex justify-between"><span className="text-white/40">Website Visits</span><span className="text-cyan-400 font-bold">+{(activity as any).websiteVisitEarnings?.toFixed(1) || 0}H</span></div>
-              <div className="flex justify-between border-t border-white/[0.06] pt-1"><span className="text-white/60 font-semibold">Total Earned</span><span className="text-white font-bold">+{(activity as any).totalCalculatedEarnings?.toFixed(1) || 0}H</span></div>
-              <div className="flex justify-between"><span className="text-white/40">Withdrawn</span><span className="text-red-400 font-bold">-{(activity as any).totalWithdrawnHive?.toFixed(1) || 0}H</span></div>
+              <div className="flex justify-between"><span className="text-white/40">Ads</span><span className="text-hive-gold font-bold">+{(activity as any).adEarnings?.toFixed(1) || 0} coins</span></div>
+              <div className="flex justify-between"><span className="text-white/40">Tasks</span><span className="text-green-400 font-bold">+{(activity as any).taskEarnings?.toFixed(1) || 0} coins</span></div>
+              <div className="flex justify-between"><span className="text-white/40">Daily Bonus</span><span className="text-blue-400 font-bold">+{(activity as any).dailyBonusEarnings?.toFixed(1) || 0} coins</span></div>
+              <div className="flex justify-between"><span className="text-white/40">Reward Codes</span><span className="text-purple-400 font-bold">+{(activity as any).rewardCodeEarnings?.toFixed(1) || 0} coins</span></div>
+              <div className="flex justify-between"><span className="text-white/40">Website Visits</span><span class="text-cyan-400 font-bold">+{(activity as any).websiteVisitEarnings?.toFixed(1) || 0} coins</span></div>
+              <div className="flex justify-between border-t border-white/[0.06] pt-1"><span className="text-white/60 font-semibold">Total Earned</span><span className="text-white font-bold">+{(activity as any).totalCalculatedEarnings?.toFixed(1) || 0} coins</span></div>
+              <div className="flex justify-between"><span className="text-white/40">Withdrawn</span><span className="text-red-400 font-bold">-{(activity as any).totalWithdrawnHive?.toFixed(1) || 0} coins</span></div>
             </div>
           </div>
 
@@ -287,11 +285,11 @@ function AdminUsers({ adminId }: { adminId: string }) {
           <div className="pt-2 border-t border-white/[0.06]">
             <div className="flex justify-between items-center mb-2">
               <span className="text-white/40 text-xs">Expected Balance</span>
-              <span className="text-hive-gold font-bold">{activity.expectedBalance.toFixed(2)}H</span>
+              <span className="text-hive-gold font-bold">{activity.expectedBalance.toFixed(2)} coins</span>
             </div>
             <div className="flex justify-between items-center mb-2">
               <span className="text-white/40 text-xs">Actual Balance</span>
-              <span className="text-white font-bold">{activity.actualBalance.toFixed(2)}H</span>
+              <span className="text-white font-bold">{activity.actualBalance.toFixed(2)} coins</span>
             </div>
             <div className="flex justify-center">
               {activity.balanceMismatch ? (
@@ -311,7 +309,7 @@ function AdminUsers({ adminId }: { adminId: string }) {
               <p className="text-white/70 text-xs font-semibold capitalize">{tx.description ?? tx.type.replace('_', ' ')}</p>
               <div className="flex justify-between">
                 <p className="text-white/40 text-[10px]">{timeAgo(tx.created_at)}</p>
-                <p className={`font-bold text-xs ${tx.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>{tx.amount > 0 ? '+' : ''}{tx.amount}H</p>
+                <p className={`font-bold text-xs ${tx.amount > 0 ? 'text-green-400' : 'text-red-400'}`}>{tx.amount > 0 ? '+' : ''}{tx.amount} coins</p>
               </div>
             </div>
           ))}
@@ -337,7 +335,7 @@ function AdminUsers({ adminId }: { adminId: string }) {
               <div className="w-8 h-8 rounded-lg bg-white/[0.06] flex items-center justify-center text-sm flex-shrink-0">{(u.first_name ?? 'U')[0]}</div>
               <div className="flex-1 min-w-0">
                 <p className="text-white/80 text-xs font-medium truncate">{u.first_name} {u.username && <span className="text-white/40">@{u.username}</span>}</p>
-                <p className="text-hive-gold text-[10px]">{formatHive(u.hive_balance)} H {u.is_admin && <span className="text-red-400">• Admin</span>} {u.is_manager && <span className="text-blue-400">• Manager</span>} {u.listed && <span className="text-green-400">• Listed</span>}</p>
+                <p className="text-hive-gold text-[10px]">{formatHive(u.hive_balance)} coins {u.is_admin && <span className="text-red-400">• Admin</span>} {u.is_manager && <span className="text-blue-400">• Manager</span>} {u.listed && <span className="text-green-400">• Listed</span>}</p>
               </div>
               <div className="flex gap-1">
                 <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleViewActivity(u)} className="p-1.5 rounded-lg bg-blue-500/15 text-blue-400" title="View Activity">
@@ -455,7 +453,7 @@ function AdminWithdrawals({ adminId }: { adminId: string }) {
                 </div>
                 <div className="text-right">
                   <p className="text-green-400 font-black">{formatUsdt(wd.net_amount)} USDT</p>
-                  <p className="text-white/40 text-[10px]">{formatHive(wd.hive_amount)} H</p>
+                  <p className="text-white/40 text-[10px]">{formatHive(wd.hive_amount)} coins</p>
                   <p className={`text-[10px] font-bold capitalize ${statusColor[wd.status]}`}>{wd.status}</p>
                 </div>
               </div>
@@ -564,7 +562,7 @@ function AdminRewardCodes({ adminId }: { adminId: string }) {
           <div key={code.id} className="flex items-center gap-2 p-3">
             <div className="flex-1 min-w-0">
               <p className={`font-mono font-bold text-sm ${code.is_active ? 'text-hive-gold' : 'text-white/30 line-through'}`}>{code.code}</p>
-              <p className="text-white/40 text-[10px]">+{code.reward_amount}H • {code.usage_count}/{code.usage_limit ?? '∞'} used{code.expires_at ? ` • exp ${new Date(code.expires_at).toLocaleDateString()}` : ''}</p>
+              <p className="text-white/40 text-[10px]">+{code.reward_amount} coins • {code.usage_count}/{code.usage_limit ?? '∞'} used{code.expires_at ? ` • exp ${new Date(code.expires_at).toLocaleDateString()}` : ''}</p>
             </div>
             <div className="flex gap-1">
               <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleToggle(code)} className={`p-1.5 rounded-lg ${code.is_active ? 'bg-yellow-500/15 text-yellow-400' : 'bg-green-500/15 text-green-400'}`}>

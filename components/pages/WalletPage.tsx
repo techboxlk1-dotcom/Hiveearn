@@ -46,7 +46,7 @@ export default function WalletPage() {
   const feePercent = usdtAmount * 0.05;
   const totalFee = feeFixed + feePercent;
   const netAmount = Math.max(0, usdtAmount - totalFee);
-  const minWithdrawHive = requirements ? Math.ceil(requirements.minAmount / 0.00001) : 1000;
+  const minWithdrawHive = requirements ? Math.ceil(requirements.minAmount / 0.00001) : 10000;
   const maxWithdrawHive = requirements ? Math.floor(requirements.maxAmount / 0.00001) : 50000;
 
   const handleSaveWallet = async () => {
@@ -468,7 +468,7 @@ export default function WalletPage() {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-white/40 text-xs">Available</p>
-                  <p className="text-hive-gold font-black text-xl">{user.hive_balance.toLocaleString()} HIVE</p>
+                  <p className="text-hive-gold font-black text-xl">{user.hive_balance.toLocaleString()} coins</p>
                 </div>
                 <div className="text-right">
                   <p className="text-white/40 text-xs">Wallet</p>
@@ -482,7 +482,7 @@ export default function WalletPage() {
                   type="number"
                   value={withdrawAmount}
                   onChange={e => setWithdrawAmount(e.target.value)}
-                  placeholder={`Min ${minWithdrawHive} coins (${requirements?.minAmount ?? 0.01} USDT)`}
+                  placeholder={`Min ${minWithdrawHive} coins (${requirements?.minAmount ?? 0.1} USDT)`}
                   min={minWithdrawHive}
                   max={Math.min(user.hive_balance, maxWithdrawHive)}
                   className="flex-1 px-4 py-3 bg-white/[0.06] border border-white/10 rounded-xl text-white text-sm placeholder:text-white/20 focus:outline-none focus:border-hive-gold/40 transition-all"
@@ -514,7 +514,7 @@ export default function WalletPage() {
                 disabled={!savedWallet || hiveAmount < minWithdrawHive || hiveAmount > user.hive_balance || hiveAmount > maxWithdrawHive || withdrawing}
                 className="btn-hive w-full py-4 font-black rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {withdrawing ? 'Processing...' : hiveAmount < minWithdrawHive ? `Min ${minWithdrawHive} coins (${requirements?.minAmount ?? 0.01} USDT)` : 'Request Withdrawal'}
+                {withdrawing ? 'Processing...' : hiveAmount < minWithdrawHive ? `Min ${minWithdrawHive} coins (${requirements?.minAmount ?? 0.1} USDT)` : 'Request Withdrawal'}
               </motion.button>
               <p className="text-white/20 text-xs text-center mt-2">Reviewed by admin within 24 hours</p>
             </GlassCard>

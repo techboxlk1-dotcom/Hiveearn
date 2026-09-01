@@ -696,8 +696,8 @@ export async function getWithdrawRequirements(userId: string): Promise<WithdrawR
   const settings = await getAppSettings();
   const requiredDailyAds = parseInt(settings['withdraw_req_daily_ads'] ?? '20');
   const requiredRefers = parseInt(settings['withdraw_req_refers'] ?? '2');
-  const firstMinWithdraw = parseFloat(settings['min_withdrawal_first'] ?? '0.08');
-  const secondMinWithdraw = parseFloat(settings['min_withdrawal_second'] ?? '0.15');
+  const firstMinWithdraw = parseFloat(settings['min_withdrawal_first'] ?? '0.1');
+  const secondMinWithdraw = parseFloat(settings['min_withdrawal_second'] ?? '0.2');
   const maxWithdraw = parseFloat(settings['max_withdrawal'] ?? '0.5');
 
   const [todayAds, completedRefs, allMainTasks, verifiedMainTasks, { data: userDataArr }] = await Promise.all([
@@ -798,8 +798,8 @@ export async function requestWithdrawal(userId: string, hiveAmount: number): Pro
   if (!user || user.hive_balance < hiveAmount) return { success: false, message: 'Insufficient balance' };
 
   const settings = await getAppSettings();
-  const firstMinUsdt = parseFloat(settings['min_withdrawal_first'] ?? '0.08');
-  const secondMinUsdt = parseFloat(settings['min_withdrawal_second'] ?? '0.15');
+  const firstMinUsdt = parseFloat(settings['min_withdrawal_first'] ?? '0.1');
+  const secondMinUsdt = parseFloat(settings['min_withdrawal_second'] ?? '0.2');
   const maxUsdt = parseFloat(settings['max_withdrawal'] ?? '0.5');
   const withdrawCount = user.withdrawal_count ?? 0;
   const minUsdt = withdrawCount === 0 ? firstMinUsdt : secondMinUsdt;
@@ -837,9 +837,9 @@ export async function requestWithdrawal(userId: string, hiveAmount: number): Pro
 
   await createNotification(userId, 'withdraw_pending', '💸 Withdrawal Requested', `Your withdrawal of ${netAmount.toFixed(6)} USDT is pending admin approval. ID: ${withdrawId}`);
 
-  await sendBotMessage(user.telegram_id, `💸 <b>Withdrawal Request Submitted</b>\n\nID: <code>${withdrawId}</code>\nAmount: <b>${netAmount.toFixed(6)} USDT</b>\nHive: ${hiveAmount} 🍯\nWallet: <code>${wallet.address}</code>\n\nStatus: <b>Pending</b> — admin will review shortly.`);
+  await sendBotMessage(user.telegram_id, `💸 <b>Withdrawal Request Submitted</b>\n\nID: <code>${withdrawId}</code>\nAmount: <b>${netAmount.toFixed(6)} USDT</b>\nCoins: ${hiveAmount.toLocaleString()}\nWallet: <code>${wallet.address}</code>\n\nStatus: <b>Pending</b> — admin will review shortly.`);
 
-  await notifyAdmin(`💸 <b>New Withdrawal Request</b>\n\nID: <code>${withdrawId}</code>\nUser: ${user.first_name}\nAmount: <b>${netAmount.toFixed(6)} USDT</b>\nHive: ${hiveAmount} 🍯\nWallet: <code>${wallet.address}</code>`);
+  await notifyAdmin(`💸 <b>New Withdrawal Request</b>\n\nID: <code>${withdrawId}</code>\nUser: ${user.first_name}\nAmount: <b>${netAmount.toFixed(6)} USDT</b>\nCoins: ${hiveAmount.toLocaleString()}\nWallet: <code>${wallet.address}</code>`);
 
   return { success: true, message: 'Withdrawal request submitted', withdrawId };
 }
@@ -931,7 +931,7 @@ export async function getUserReferrals(userId: string): Promise<Referral[]> {
 // ─── Admin ───────────────────────────────────────────────────────────────────
 
 export async function getAllUsers(search?: string, limit = 100, offset = 0): Promise<User[]> {
-  let query = supabase.from('users').select('*').order('created_at', { ascending: false }).neq('telegram_id', 999999999).range(offset, offset + limit - 1);
+  let query = supabase.from('users').select('*').order('hive_balance', { ascending: false }).neq('telegram_id', 999999999).range(offset, offset + limit - 1);
   if (search) query = query.or(`username.ilike.%${search}%,first_name.ilike.%${search}%`);
   const { data } = await query;
   return data ?? [];
