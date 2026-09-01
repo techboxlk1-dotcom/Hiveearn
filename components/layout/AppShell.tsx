@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import { useUser } from '@/contexts/UserContext';
 import BottomNav from './BottomNav';
 import SplashScreen from '@/components/SplashScreen';
+import ChannelGate from './ChannelGate';
 import { motion } from 'framer-motion';
-import { ShieldOff, Wrench } from 'lucide-react';
+import { ShieldOff, Wrench, Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 interface AppShellProps {
@@ -35,23 +36,29 @@ export default function AppShell({ children, hideNav = false }: AppShellProps) {
           className="flex flex-col items-center gap-5"
         >
           <div className="relative">
-            <div className="absolute inset-0 rounded-full blur-3xl bg-yellow-500/20 scale-150" />
-            <div className="relative w-24 h-24 rounded-3xl bg-yellow-500/10 border border-yellow-500/30 flex items-center justify-center">
-              <Wrench size={40} className="text-yellow-400" />
+            <div className="absolute inset-0 rounded-full blur-3xl bg-hive-gold/20 scale-150" />
+            <div className="relative w-24 h-24 rounded-3xl bg-hive-gold/10 border border-hive-gold/30 flex items-center justify-center">
+              <Wrench size={40} className="text-hive-gold" />
             </div>
           </div>
 
           <div>
-            <h1 className="text-white font-black text-2xl mb-2">Under Maintenance</h1>
+            <h1 className="text-white font-black text-2xl mb-2 flex items-center gap-2 justify-center">
+              V2 Coming Soon <Sparkles size={22} className="text-hive-gold" />
+            </h1>
             <p className="text-white/50 text-sm leading-relaxed max-w-xs">
-              Hive Earn is currently undergoing maintenance. Please check back soon!
+              Hive Earn V1 has ended. We&apos;re launching V2 with a new coin system, refreshed design, and faster rewards. Check back shortly!
             </p>
           </div>
 
-          <div className="w-full max-w-xs p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-2xl">
-            <p className="text-yellow-300 text-sm font-medium">
-              We&apos;re making things better for you.
-            </p>
+          <div className="w-full max-w-xs p-4 bg-hive-gold/10 border border-hive-gold/20 rounded-2xl space-y-2">
+            <p className="text-hive-gold text-sm font-bold">V2 Highlights</p>
+            <ul className="text-white/60 text-xs space-y-1 text-left">
+              <li>• 1,000 coins = $0.01 USDT</li>
+              <li>• Mining: 100 coins/session, 10 claims/day</li>
+              <li>• Minimum withdrawal: 1,000 coins</li>
+              <li>• New look and smoother experience</li>
+            </ul>
           </div>
 
           <a
@@ -63,7 +70,7 @@ export default function AppShell({ children, hideNav = false }: AppShellProps) {
             Join Community for Updates
           </a>
 
-          <p className="text-white/20 text-xs">Hive Earn</p>
+          <p className="text-white/20 text-xs">Hive Earn V2</p>
         </motion.div>
       </div>
     );
@@ -120,11 +127,13 @@ export default function AppShell({ children, hideNav = false }: AppShellProps) {
   }
 
   return (
-    <div className="min-h-dvh bg-[#0A0A0A] honeycomb-bg">
-      <main className={hideNav ? '' : 'pb-nav'}>
-        {children}
-      </main>
-      {!hideNav && <BottomNav />}
-    </div>
+    <ChannelGate>
+      <div className="min-h-dvh bg-[#0A0A0A] honeycomb-bg">
+        <main className={hideNav ? '' : 'pb-nav'}>
+          {children}
+        </main>
+        {!hideNav && <BottomNav />}
+      </div>
+    </ChannelGate>
   );
 }

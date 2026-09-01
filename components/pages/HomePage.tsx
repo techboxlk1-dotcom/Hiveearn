@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
-import { Bell, Gift, Trophy, Megaphone, ChevronRight, Wallet, PlayCircle, CheckSquare, Users, Zap, Copy, ExternalLink, Pickaxe, Timer, CheckCircle2, AlertCircle, RefreshCw, XCircle, Shield, Dices, Gamepad2 } from 'lucide-react';
+import { Bell, Gift, Trophy, Megaphone, ChevronRight, Wallet, PlayCircle, CheckSquare, Users, Zap, Copy, ExternalLink, Pickaxe, Timer, CheckCircle2, AlertCircle, RefreshCw, XCircle, Shield } from 'lucide-react';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import HiveBalance from '@/components/ui/HiveBalance';
@@ -124,7 +124,7 @@ export default function HomePage() {
   const { showAutoAd, startAdWithTimer, getMinWatchTime } = useAds();
   const initialAdShown = useRef(false);
   const earnTouchCount = useRef(0);
-  const [miningStatus, setMiningStatus] = useState<{ isMining: boolean; startedAt: string | null; elapsedHours: number; pendingHive: number }>({ isMining: false, startedAt: null, elapsedHours: 0, pendingHive: 0 });
+  const [miningStatus, setMiningStatus] = useState<{ isMining: boolean; startedAt: string | null; elapsedHours: number; pendingHive: number; dailyClaims: number; dailyClaimsRemaining: number }>({ isMining: false, startedAt: null, elapsedHours: 0, pendingHive: 0, dailyClaims: 0, dailyClaimsRemaining: 10 });
   const [miningLoading, setMiningLoading] = useState(false);
   const [miningTick, setMiningTick] = useState(0);
 
@@ -175,7 +175,7 @@ export default function HomePage() {
 
       const res = await startMining(user.id);
       if (res.success) {
-        toast.success('⛏️ Mining started! +20 Hive every hour!');
+        toast.success('⛏️ Mining started! +100 coins per session!');
         setMiningStatus(await getMiningStatus(user.id));
       } else {
         toast.error(res.message);
@@ -256,9 +256,6 @@ export default function HomePage() {
     { icon: Zap, label: 'Reward Code', href: '/reward-code', color: 'text-purple-400', bg: 'bg-purple-400/10' },
     { icon: Wallet, label: 'Withdraw', href: '/wallet', color: 'text-blue-400', bg: 'bg-blue-400/10' },
     { icon: Trophy, label: 'Leaderboard', href: '/leaderboard', color: 'text-hive-gold', bg: 'bg-hive-gold/10' },
-    { icon: Gift, label: 'Giveaway', href: '/giveaway', color: 'text-pink-400', bg: 'bg-pink-400/10' },
-    { icon: Dices, label: 'Spin Wheel', href: '/giveaway', color: 'text-orange-400', bg: 'bg-orange-400/10' },
-    { icon: Gamepad2, label: 'Mini Game', href: '/giveaway', color: 'text-cyan-400', bg: 'bg-cyan-400/10' },
   ];
 
   const txTypeColor: Record<string, string> = {
@@ -331,7 +328,7 @@ export default function HomePage() {
                 </div>
                 <div>
                   <p className="text-white font-bold text-sm">Hive Mining</p>
-                  <p className="text-hive-gold text-xs font-semibold">+20 Hive / hour</p>
+                  <p className="text-hive-gold text-xs font-semibold">+100 coins / session</p>
                 </div>
               </div>
               {miningStatus.isMining ? (
@@ -345,6 +342,12 @@ export default function HomePage() {
                   <span className="text-hive-gold text-[10px] font-bold">READY</span>
                 </div>
               ) : null}
+            </div>
+
+            {/* Daily claims remaining badge */}
+            <div className="flex items-center justify-between mb-2 px-3 py-1.5 bg-white/[0.03] rounded-lg">
+              <span className="text-white/40 text-[10px] font-semibold uppercase tracking-wide">Claims Left Today</span>
+              <span className="text-hive-gold text-xs font-bold">{miningStatus.dailyClaimsRemaining} / 10</span>
             </div>
 
             {miningStatus.isMining ? (
@@ -367,9 +370,9 @@ export default function HomePage() {
                     </span>
                   </div>
                   <div className="text-right">
-                    <p className="text-white/40 text-[10px]]">Pending</p>
+                    <p className="text-white/40 text-[10px]">Pending</p>
                     <p className="text-hive-gold font-bold text-sm">{(() => { // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-                      miningTick; return Math.floor((Date.now() - new Date(miningStatus.startedAt!).getTime()) / 3600000) * 20; })()} Hive</p>
+                      miningTick; return 100; })()} coins</p>
                   </div>
                 </div>
                 <motion.button
@@ -390,7 +393,7 @@ export default function HomePage() {
                     <CheckCircle2 size={16} className="text-hive-gold" />
                     <span className="text-white/60 text-xs font-semibold">Mining complete! Claim your reward.</span>
                   </div>
-                  <p className="text-hive-gold font-bold text-sm">{miningStatus.pendingHive} Hive</p>
+                  <p className="text-hive-gold font-bold text-sm">{miningStatus.pendingHive} coins</p>
                 </div>
                 <motion.button
                   onClick={handleClaimMining}
@@ -400,7 +403,7 @@ export default function HomePage() {
                   style={{ background: 'linear-gradient(135deg,#F5C518,#FFB300)', color: '#0A0A0A' }}
                 >
                   {miningLoading ? <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full" /> : <Pickaxe size={16} />}
-                  {miningLoading ? 'Processing...' : 'Claim 20 Hive'}
+                  {miningLoading ? 'Processing...' : 'Claim 100 Coins'}
                 </motion.button>
               </div>
             ) : (
@@ -412,7 +415,7 @@ export default function HomePage() {
                 style={{ background: 'linear-gradient(135deg,#F5C518,#FFB300)', color: '#0A0A0A' }}
               >
                 {miningLoading ? <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full" /> : <Pickaxe size={16} />}
-                {miningLoading ? 'Starting...' : 'Start Mining — 20 Hive/hr'}
+                {miningLoading ? 'Starting...' : 'Start Mining — 100 coins/session'}
               </motion.button>
             )}
           </GlassCard>
@@ -439,10 +442,10 @@ export default function HomePage() {
         <motion.div variants={item} onClick={handleEarnMoreTouch}>
           <h3 className="text-white/40 text-xs font-semibold uppercase tracking-widest mb-3">Earn More</h3>
           <div className="grid grid-cols-3 gap-3">
-            {[
-              { icon: PlayCircle, label: 'Watch Ads', sub: 'Up to 10 Hive', href: '/ads', color: 'from-blue-900/40 to-blue-800/20' },
-              { icon: CheckSquare, label: 'Tasks', sub: '20-200 Hive', href: '/tasks', color: 'from-green-900/40 to-green-800/20' },
-              { icon: Users, label: 'Refer', sub: 'Up to 150 Hive', href: '/referral', color: 'from-purple-900/40 to-purple-800/20' },
+              {[
+              { icon: PlayCircle, label: 'Watch Ads', sub: 'Earn coins', href: '/ads', color: 'from-blue-900/40 to-blue-800/20' },
+              { icon: CheckSquare, label: 'Tasks', sub: '200-2000 coins', href: '/tasks', color: 'from-green-900/40 to-green-800/20' },
+              { icon: Users, label: 'Refer', sub: 'Up to 1500 coins', href: '/referral', color: 'from-purple-900/40 to-purple-800/20' },
             ].map(({ icon: Icon, label, sub, href, color }) => (
               <Link key={href} href={href}>
                 <motion.div whileTap={{ scale: 0.92 }} className={`p-3 rounded-2xl bg-gradient-to-br ${color} border border-white/[0.08] flex flex-col gap-2 h-full`}>
@@ -465,7 +468,7 @@ export default function HomePage() {
                 <Users size={16} className="text-purple-400" />
                 <span className="text-white font-semibold text-sm">Your Referral Link</span>
               </div>
-              <span className="text-xs text-hive-gold font-semibold">+150 Hive</span>
+              <span className="text-xs text-hive-gold font-semibold">+1500 coins</span>
             </div>
             <div className="flex items-center gap-2 p-3 bg-white/[0.04] rounded-xl">
               <p className="text-white/50 text-xs font-mono flex-1 truncate">{referralLink}</p>
@@ -491,7 +494,7 @@ export default function HomePage() {
                     <p className="text-white/30 text-[10px]">{timeAgo(tx.created_at)}</p>
                   </div>
                   <span className={`font-bold text-sm ${tx.amount > 0 ? 'text-green-400' : 'text-red-400'} ${txTypeColor[tx.type]}`}>
-                    {tx.amount > 0 ? '+' : ''}{formatHive(tx.amount)} 🍯
+                    {tx.amount > 0 ? '+' : ''}{formatHive(tx.amount)} coins
                   </span>
                 </div>
               ))}

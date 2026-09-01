@@ -21,23 +21,37 @@ async function notifyAdmin(text: string): Promise<void> {
 }
 
 // Check if user is member of a Telegram channel (via edge function)
+export const REQUIRED_CHANNELS = {
+  community: 'hiveearn',
+  payments: 'hiveearnpayment',
+} as const;
+
 export async function checkChannelMembership(userId: number, channel: string): Promise<boolean> {
   try {
-    const { data } = await supabase.functions.invoke('check-membership', {
+    const { data, error } = await supabase.functions.invoke('check-membership', {
       body: { user_id: userId, channel },
     });
+    if (error) return false;
     return (data as { is_member?: boolean })?.is_member === true;
   } catch {
     return false;
   }
 }
 
+export async function checkRequiredChannelMembership(userId: number): Promise<{ community: boolean; payments: boolean }> {
+  const [community, payments] = await Promise.all([
+    checkChannelMembership(userId, REQUIRED_CHANNELS.community),
+    checkChannelMembership(userId, REQUIRED_CHANNELS.payments),
+  ]);
+  return { community, payments };
+}
+
 // Welcome message sent on first login / /start
 export async function sendWelcomeMessage(telegramId: number, firstName: string, username?: string): Promise<void> {
-  const text = `🐝 <b>Welcome to Hive Earn, ${firstName}!</b>\n\n` +
-    `Hive Earn is a Telegram mini app where you earn <b>🍯 Hive tokens</b> by watching ads, completing tasks, claiming daily bonuses, and inviting friends. Hive tokens can be withdrawn as <b>USDT (BEP20)</b>.\n\n` +
-    `<b>How to earn:</b>\n📺 Watch ads • ✅ Complete tasks • 🎁 Daily bonus • ⚡ Reward codes • 👥 Refer friends\n\n` +
-    `<b>Withdrawal:</b> Min $0.08 USDT | Network: BSC (BEP20)\n\nTap below to start earning! 🚀`;
+  const text = `🐝 <b>Welcome to Hive Earn V2, ${firstName}!</b>\n\n` +
+    `A cleaner way to earn USDT from your Telegram mini app. Your balance now uses <b>Hive Coins</b>: <b>1,000 coins = $0.01 USDT</b>.\n\n` +
+    `<b>Earn in V2:</b>\n📺 Watch verified ads • ⛏️ Mine 100 coins per session • ✅ Complete tasks\n🎁 Claim your daily bonus • ⚡ Redeem codes • 👥 Invite friends\n\n` +
+    `<b>Mining:</b> 1 hour per session, up to 10 claims per day.\n<b>Withdrawal:</b> From 1,000 coins ($0.01) | BSC (BEP20)\n\nJoin both required channels, verify, and start earning!`;
   await sendBotMessage(telegramId, text, true, true); // Include banner and community/payment buttons
 }
 
