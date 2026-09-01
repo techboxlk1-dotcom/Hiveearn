@@ -5,7 +5,7 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export const HIVE_TO_USDT = 0.0001; // 1 Hive = 0.0001 USDT (100 Hive = 0.01 USDT)
+export const HIVE_TO_USDT = 0.00001; // V2: 1 coin = $0.00001 (1000 coins = $0.01)
 
 export function hiveToUsdt(hive: number): number {
   return hive * HIVE_TO_USDT;

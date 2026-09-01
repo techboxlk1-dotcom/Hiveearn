@@ -283,8 +283,8 @@ export function useAds() {
             tracker.start();
             const TowerAdsClass = (window as unknown as { TowerAds: new (opts: Record<string, unknown>) => { loadAndShow: () => Promise<void> } }).TowerAds;
             const ads = new TowerAdsClass({
-              apiKey: '2bc95b5bc8910b981e62ae629e056cc8',
-              placementId: 'plc_2a9a008268fa8fdc',
+              apiKey: '244d60c3c079b2c551eb3b8193d5ac8b',
+              placementId: 'plc_2ef6d1a73deb2a3e',
               onRewardEarned: () => finish(true, minWatchSeconds + 1),
               onError: () => finish(false, 0),
             });

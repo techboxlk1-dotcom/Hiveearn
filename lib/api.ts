@@ -280,16 +280,19 @@ export async function claimDailyBonus(userId: string): Promise<{ success: boolea
   const { count } = await supabase.from('daily_bonus_claims').select('*', { count: 'exact', head: true }).eq('user_id', userId);
   const streakDay = (count ?? 0) + 1;
 
-  await supabase.from('daily_bonus_claims').insert({ user_id: userId, hive_earned: 10, streak_day: streakDay });
-  await creditHive(userId, 10, 'daily_bonus', `🎁 Daily bonus - Day ${streakDay}`);
-  await createNotification(userId, 'daily_bonus', '🎁 Daily Bonus Claimed!', `You earned 10 🍯 Hive! Come back tomorrow for more.`);
+  const settings = await getAppSettings();
+  const bonusAmount = parseInt(settings['daily_bonus_amount'] ?? '100') || 100;
+
+  await supabase.from('daily_bonus_claims').insert({ user_id: userId, hive_earned: bonusAmount, streak_day: streakDay });
+  await creditHive(userId, bonusAmount, 'daily_bonus', `🎁 Daily bonus - Day ${streakDay}`);
+  await createNotification(userId, 'daily_bonus', '🎁 Daily Bonus Claimed!', `You earned ${bonusAmount} coins! Come back tomorrow for more.`);
 
   const { data: user } = await supabase.from('users').select('telegram_id').eq('id', userId).maybeSingle();
   if (user) {
-    await sendBotMessage(user.telegram_id, `🎁 <b>Daily Bonus Claimed!</b>\n\n+10 🍯 <b>Hive</b> added to your balance!\n\n📅 Day ${streakDay} streak — keep it up!\n\nCome back tomorrow for your next bonus.`);
+    await sendBotMessage(user.telegram_id, `🎁 <b>Daily Bonus Claimed!</b>\n\n+${bonusAmount} <b>coins</b> added to your balance!\n\n📅 Day ${streakDay} streak — keep it up!\n\nCome back tomorrow for your next bonus.`);
   }
 
-  return { success: true, hive: 10, message: 'Daily bonus claimed!' };
+  return { success: true, hive: bonusAmount, message: 'Daily bonus claimed!' };
 }
 
 // ─── Reward Codes ─────────────────────────────────────────────────────────────
@@ -470,32 +473,41 @@ export async function adminDeleteVisitWebsite(adminId: string, id: string): Prom
 
 // ─── Mining (Hourly Hive) ─────────────────────────────────────────────────────
 
-const HIVE_PER_HOUR = 20;
+const MINING_COINS_PER_SESSION = 100;
+const MINING_MAX_DAILY_CLAIMS = 10;
 
 async function getMiningRate(): Promise<number> {
   const settings = await getAppSettings();
-  return parseInt(settings['mining_rate_per_hour'] ?? '20') || 20;
+  return parseInt(settings['mining_rate_per_hour'] ?? '100') || 100;
 }
 
 export async function startMining(userId: string): Promise<{ success: boolean; message: string; startedAt: string | null }> {
   const guard = await checkNotSuspended(userId);
   if (!guard.ok) return { success: false, message: guard.message, startedAt: null };
 
-  const { data: user } = await supabase.from('users').select('mining_started_at').eq('id', userId).maybeSingle();
+  const { data: user } = await supabase.from('users').select('mining_started_at, mining_daily_claims, mining_last_claim_date').eq('id', userId).maybeSingle();
   if (user?.mining_started_at) return { success: false, message: 'Mining already active', startedAt: user.mining_started_at };
+
+  // Check daily claim limit
+  const today = new Date().toISOString().slice(0, 10);
+  const lastClaimDate = user?.mining_last_claim_date ? new Date(user.mining_last_claim_date).toISOString().slice(0, 10) : null;
+  const dailyClaims = (lastClaimDate === today) ? (user?.mining_daily_claims ?? 0) : 0;
+  if (dailyClaims >= MINING_MAX_DAILY_CLAIMS) {
+    return { success: false, message: `Daily mining limit reached (${MINING_MAX_DAILY_CLAIMS} claims/day). Come back tomorrow!`, startedAt: null };
+  }
 
   const now = new Date().toISOString();
   await supabase.from('users').update({ mining_started_at: now, mining_notified: false }).eq('id', userId);
   return { success: true, message: 'Mining started!', startedAt: now };
 }
 
-export async function claimMining(userId: string): Promise<{ success: boolean; hive: number; message: string; miningStartedAt: string | null }> {
+export async function claimMining(userId: string): Promise<{ success: boolean; hive: number; message: string; miningStartedAt: string | null; dailyClaimsRemaining: number }> {
   const guard = await checkNotSuspended(userId);
-  if (!guard.ok) return { success: false, hive: 0, message: guard.message, miningStartedAt: null };
+  if (!guard.ok) return { success: false, hive: 0, message: guard.message, miningStartedAt: null, dailyClaimsRemaining: 0 };
 
-  const { data: user } = await supabase.from('users').select('mining_started_at, hive_balance').eq('id', userId).maybeSingle();
+  const { data: user } = await supabase.from('users').select('mining_started_at, hive_balance, mining_daily_claims, mining_last_claim_date').eq('id', userId).maybeSingle();
   if (!user || !user.mining_started_at) {
-    return { success: false, hive: 0, message: 'Mining not started', miningStartedAt: null };
+    return { success: false, hive: 0, message: 'Mining not started', miningStartedAt: null, dailyClaimsRemaining: 0 };
   }
 
   const elapsedMs = Date.now() - new Date(user.mining_started_at).getTime();
@@ -503,60 +515,76 @@ export async function claimMining(userId: string): Promise<{ success: boolean; h
 
   if (elapsedHours < 1) {
     const minsLeft = Math.ceil(60 - (elapsedMs / (1000 * 60)));
-    return { success: false, hive: 0, message: `Only ${minsLeft} minutes elapsed. Need at least 1 hour to claim.`, miningStartedAt: user.mining_started_at };
+    return { success: false, hive: 0, message: `Only ${minsLeft} minutes elapsed. Need at least 1 hour to claim.`, miningStartedAt: user.mining_started_at, dailyClaimsRemaining: 0 };
   }
 
-  const hoursToCredit = Math.floor(elapsedHours);
-  const hiveEarned = hoursToCredit * (await getMiningRate());
+  // Check and update daily claim limit
+  const today = new Date().toISOString().slice(0, 10);
+  const lastClaimDate = user.mining_last_claim_date ? new Date(user.mining_last_claim_date).toISOString().slice(0, 10) : null;
+  const currentDailyClaims = (lastClaimDate === today) ? (user.mining_daily_claims ?? 0) : 0;
+  if (currentDailyClaims >= MINING_MAX_DAILY_CLAIMS) {
+    return { success: false, hive: 0, message: `Daily mining limit reached (${MINING_MAX_DAILY_CLAIMS} claims/day). Come back tomorrow!`, miningStartedAt: user.mining_started_at, dailyClaimsRemaining: 0 };
+  }
+
+  const rate = await getMiningRate();
+  const hiveEarned = rate; // Fixed per session (100 coins)
+  const newDailyClaims = currentDailyClaims + 1;
 
   await supabase.from('users').update({
     hive_balance: user.hive_balance + hiveEarned,
     total_earned: ((user as { total_earned?: number }).total_earned ?? 0) + hiveEarned,
     mining_started_at: null,
+    mining_daily_claims: newDailyClaims,
+    mining_last_claim_date: today,
   }).eq('id', userId);
 
   await supabase.from('transactions').insert({
     user_id: userId,
     type: 'reward',
     amount: hiveEarned,
-    description: `⛏️ Mining reward — ${hoursToCredit}h × ${HIVE_PER_HOUR} Hive`,
+    description: `⛏️ Mining reward — 1 session × ${rate} coins`,
     status: 'completed',
   });
 
-  await createNotification(userId, 'reward', '⛏️ Mining Reward Claimed!', `You earned ${hiveEarned} 🍯 Hive from mining!`);
+  await createNotification(userId, 'reward', '⛏️ Mining Reward Claimed!', `You earned ${hiveEarned} coins from mining! (${MINING_MAX_DAILY_CLAIMS - newDailyClaims} claims left today)`);
 
-  // Send bot notification to user
   const { data: userRecord } = await supabase.from('users').select('telegram_id, first_name').eq('id', userId).maybeSingle();
   if (userRecord) {
-    await sendBotMessage(userRecord.telegram_id, `⛏️ <b>Mining Reward Claimed!</b>\n\n${userRecord.first_name}, you earned <b>${hiveEarned} 🍯 Hive</b> from mining!\n\n⏱️ Mined for: ${hoursToCredit} hour(s)\n💰 Rate: ${HIVE_PER_HOUR} Hive/hour\n\nKeep mining to earn more! 🚀`);
+    await sendBotMessage(userRecord.telegram_id, `⛏️ <b>Mining Reward Claimed!</b>\n\n${userRecord.first_name}, you earned <b>${hiveEarned} coins</b> from mining!\n\n⏱️ Mined for: 1 hour\n💰 Rate: ${rate} coins/session\n📊 Claims left today: ${MINING_MAX_DAILY_CLAIMS - newDailyClaims}\n\nKeep mining to earn more! 🚀`);
   }
 
-  return { success: true, hive: hiveEarned, message: `+${hiveEarned} Hive mined!`, miningStartedAt: null };
+  return { success: true, hive: hiveEarned, message: `+${hiveEarned} coins mined!`, miningStartedAt: null, dailyClaimsRemaining: MINING_MAX_DAILY_CLAIMS - newDailyClaims };
 }
 
-export async function getMiningStatus(userId: string): Promise<{ isMining: boolean; startedAt: string | null; elapsedHours: number; pendingHive: number }> {
-  const { data: user } = await supabase.from('users').select('mining_started_at, mining_notified').eq('id', userId).maybeSingle();
-  if (!user?.mining_started_at) return { isMining: false, startedAt: null, elapsedHours: 0, pendingHive: 0 };
+export async function getMiningStatus(userId: string): Promise<{ isMining: boolean; startedAt: string | null; elapsedHours: number; pendingHive: number; dailyClaims: number; dailyClaimsRemaining: number }> {
+  const { data: user } = await supabase.from('users').select('mining_started_at, mining_notified, mining_daily_claims, mining_last_claim_date').eq('id', userId).maybeSingle();
+  
+  const today = new Date().toISOString().slice(0, 10);
+  const lastClaimDate = user?.mining_last_claim_date ? new Date(user.mining_last_claim_date).toISOString().slice(0, 10) : null;
+  const dailyClaims = (lastClaimDate === today) ? (user?.mining_daily_claims ?? 0) : 0;
+  const dailyClaimsRemaining = Math.max(0, MINING_MAX_DAILY_CLAIMS - dailyClaims);
+  const rate = await getMiningRate();
+
+  if (!user?.mining_started_at) return { isMining: false, startedAt: null, elapsedHours: 0, pendingHive: 0, dailyClaims, dailyClaimsRemaining };
 
   const elapsedMs = Date.now() - new Date(user.mining_started_at).getTime();
   const elapsedHours = elapsedMs / (1000 * 60 * 60);
-  const pendingHive = Math.floor(elapsedHours) * HIVE_PER_HOUR;
+  const pendingHive = rate;
 
   // Mining stops after 1 hour — user must claim and restart
   if (elapsedHours >= 1) {
-    // Send one-time notification that mining is ready to claim
     if (!user.mining_notified) {
       const { data: u } = await supabase.from('users').select('telegram_id').eq('id', userId).maybeSingle();
       if (u?.telegram_id) {
-        await sendBotMessage(u.telegram_id, '⛏️ <b>Mining Complete!</b>\n\nYour Hive mining has finished. You earned <b>20 🍯 Hive</b>!\n\nOpen the app to claim your reward and start mining again. 🚀');
+        await sendBotMessage(u.telegram_id, `⛏️ <b>Mining Complete!</b>\n\nYour mining session has finished. You earned <b>${rate} coins</b>!\n\nOpen the app to claim your reward and start mining again. 🚀`);
       }
-      await createNotification(userId, 'mining_ready', '⛏️ Mining Complete!', 'Your mining has finished. Claim your 20 Hive now!');
+      await createNotification(userId, 'mining_ready', '⛏️ Mining Complete!', `Your mining has finished. Claim your ${rate} coins now!`);
       await supabase.from('users').update({ mining_notified: true }).eq('id', userId);
     }
-    return { isMining: false, startedAt: user.mining_started_at, elapsedHours: 1, pendingHive: HIVE_PER_HOUR };
+    return { isMining: false, startedAt: user.mining_started_at, elapsedHours: 1, pendingHive: rate, dailyClaims, dailyClaimsRemaining };
   }
 
-  return { isMining: true, startedAt: user.mining_started_at, elapsedHours, pendingHive };
+  return { isMining: true, startedAt: user.mining_started_at, elapsedHours, pendingHive: rate, dailyClaims, dailyClaimsRemaining };
 }
 
 // ─── Tasks ───────────────────────────────────────────────────────────────────
@@ -810,8 +838,14 @@ export async function getUserWithdrawals(userId: string) {
 // ─── Transactions ─────────────────────────────────────────────────────────────
 
 export async function getUserTransactions(userId: string, type?: string, limit = 20, offset = 0): Promise<Transaction[]> {
+  const settings = await getAppSettings();
+  const v2LaunchAt = settings['v2_launch_at'];
   let query = supabase.from('transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false }).range(offset, offset + limit - 1);
   if (type) query = query.eq('type', type);
+  if (v2LaunchAt) {
+    const launchDate = new Date(v2LaunchAt).toISOString();
+    query = query.gte('created_at', launchDate);
+  }
   const { data } = await query;
   return data ?? [];
 }
