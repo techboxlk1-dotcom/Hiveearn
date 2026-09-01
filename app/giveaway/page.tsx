@@ -1,5 +1,5 @@
-import GiveawayPage from '@/components/pages/GiveawayPage';
+import { redirect } from 'next/navigation';
 
 export default function Page() {
-  return <GiveawayPage />;
+  redirect('/');
 }

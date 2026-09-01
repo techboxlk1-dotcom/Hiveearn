@@ -145,7 +145,7 @@ export default function LeaderboardPage() {
           <p className={`font-semibold text-sm truncate ${isCurrentUser ? 'text-hive-gold' : 'text-white/80'}`}>
             {displayName}{isCurrentUser && ' (You)'}
           </p>
-          <p className="text-white/30 text-[10px]">{value} {prize > 0 && `• Prize: ${prize} 🍯`}</p>
+          <p className="text-white/30 text-[10px]">{value} {prize > 0 && `• Prize: ${prize} coins`}</p>
         </div>
 
         <div className="text-right flex-shrink-0">
@@ -229,7 +229,7 @@ export default function LeaderboardPage() {
           <GlassCard className="p-4 text-center" animate={false}>
             <Gift size={28} className="text-hive-gold mx-auto mb-2" />
             <p className="text-white font-bold text-sm">Monthly Referral Leaderboard</p>
-            <p className="text-hive-gold font-black text-xl mt-1">50,000 🍯 Hive Prize Pool</p>
+            <p className="text-hive-gold font-black text-xl mt-1">500,000 coins Prize Pool</p>
             <p className="text-white/40 text-[10px] mt-1">Top 10 referrers share the prize! Claim your prize from the list below.</p>
           </GlassCard>
         </motion.div>
@@ -263,7 +263,7 @@ export default function LeaderboardPage() {
           )}
           {activeTab === 'monthly' && (
             <>
-              <p className="text-white/40 text-[10px] uppercase tracking-widest font-semibold px-2 pt-2 pb-1">🏆 Top Referrers — 50,000 Hive Pool</p>
+              <p className="text-white/40 text-[10px] uppercase tracking-widest font-semibold px-2 pt-2 pb-1">🏆 Top Referrers — 500,000 coins Pool</p>
               {monthly.referrers.length === 0 && <p className="text-white/30 text-xs text-center py-4">No monthly data yet. Admin needs to generate.</p>}
               {monthly.referrers.map((entry) => {
                 return renderMonthlyEntry(entry.rank, entry.user, `${entry.value} refs`, entry.prize, entry.claimed, entry.id);

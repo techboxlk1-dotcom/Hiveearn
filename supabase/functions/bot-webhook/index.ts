@@ -203,21 +203,19 @@ Deno.serve(async (req: Request) => {
       const startPayload = update.message.text.replace("/start", "").trim();
 
       const welcomeText =
-        `🐝 <b>Welcome to Hive Earn, ${firstName}!</b>\n\n` +
-        `<b>What is Hive Earn?</b>\n` +
-        `Hive Earn is a Telegram mini app where you earn <b>🍯 Hive tokens</b> by watching ads, mining, completing tasks, claiming daily bonuses, and inviting friends. Hive tokens can be withdrawn as <b>USDT (BEP20)</b> to your wallet.\n\n` +
-        `<b>How to earn Hive:</b>\n` +
-        `📺 Watch ads — earn Hive per ad (Earn tab)\n` +
-        `⛏️ Mining — start mining for +20 Hive/hour\n` +
+        `🐝 <b>Welcome to Hive Earn V2, ${firstName}!</b>\n\n` +
+        `<b>What is Hive Earn V2?</b>\n` +
+        `A cleaner, faster way to earn USDT from your Telegram mini app. Your balance now uses <b>Hive Coins</b>: <b>1,000 coins = $0.01 USDT</b>.\n\n` +
+        `<b>How to earn coins:</b>\n` +
+        `📺 Watch ads — earn coins per ad (Earn tab)\n` +
+        `⛏️ Mining — 100 coins per 1-hour session, up to 10 claims/day\n` +
         `✅ Complete tasks — social media tasks with rewards\n` +
         `🎁 Daily bonus — claim every 24 hours\n` +
-        `⚡ Reward codes — redeem codes for bonus Hive\n` +
-        `👥 Refer friends — earn up to 150 🍯 Hive per referral + 5% commission\n\n` +
-        `<b>Baby Hive & Giveaways:</b>\n` +
-        `🍼 Earn Baby Hive by watching ads in the Giveaway tab\n` +
-        `🎁 Use Baby Hive to join giveaways and win real Hive tokens\n\n` +
+        `⚡ Reward codes — redeem codes for bonus coins\n` +
+        `👥 Refer friends — earn up to 1,500 coins per referral + 5% commission\n\n` +
         `<b>Withdrawal:</b>\n` +
-        `Minimum: $0.08 USDT | Network: BSC (BEP20)\n\n` +
+        `Minimum: 1,000 coins ($0.01 USDT) | Network: BSC (BEP20)\n\n` +
+        `⚠️ You must join both our Community and Payment channels to use the app.\n\n` +
         `Tap the button below to open the mini app and start earning! 🚀`;
 
       await tgSendPhoto(chatId, welcomeText, true);
@@ -236,17 +234,16 @@ Deno.serve(async (req: Request) => {
       const chatId = update.message.chat.id;
       await tgSendMessage(
         chatId,
-        `🐝 <b>Hive Earn Help</b>\n\n` +
+        `🐝 <b>Hive Earn V2 Help</b>\n\n` +
         `<b>Commands:</b>\n` +
-        `/start — Open Hive Earn mini app\n` +
+        `/start — Open Hive Earn V2 mini app\n` +
         `/help — Show this help message\n\n` +
-        `<b>Earn Hive by:</b>\n` +
-        `📺 Watching ads (Earn tab)\n⛏️ Mining — +20 Hive/hour\n✅ Completing tasks\n🎁 Daily bonus\n⚡ Reward codes\n👥 Referring friends (150 Hive + 5% commission)\n\n` +
-        `<b>Baby Hive & Giveaways:</b>\n` +
-        `🍼 Watch ads in Giveaway tab to earn Baby Hive\n` +
-        `🎁 Use Baby Hive to join giveaways and win Hive\n\n` +
+        `<b>Earn coins by:</b>\n` +
+        `📺 Watching ads (Earn tab)\n⛏️ Mining — 100 coins/session, 10 claims/day\n✅ Completing tasks\n🎁 Daily bonus\n⚡ Reward codes\n👥 Referring friends (1,500 coins + 5% commission)\n\n` +
+        `<b>Coin Value:</b> 1,000 coins = $0.01 USDT\n` +
         `<b>Withdrawal:</b>\n` +
-        `Minimum: $0.08 USDT | Network: BSC (BEP20)\n\n` +
+        `Minimum: 1,000 coins ($0.01 USDT) | Network: BSC (BEP20)\n\n` +
+        `<b>Required:</b> Join both Community and Payment channels to use the app.\n\n` +
         `<b>Support:</b> @hiveearnsupport\n` +
         `<b>Community:</b> @${COMMUNITY_CHANNEL}\n` +
         `<b>Payments:</b> @${PAYMENT_CHANNEL}`,

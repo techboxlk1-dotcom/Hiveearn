@@ -113,7 +113,7 @@ export default function ReferralPage() {
         </Link>
         <div>
           <h1 className="text-white font-bold text-lg">Refer & Earn</h1>
-          <p className="text-white/40 text-xs">Earn up to 150 Hive per referral</p>
+          <p className="text-white/40 text-xs">Earn up to 1,500 coins per referral</p>
         </div>
       </div>
 
@@ -144,7 +144,7 @@ export default function ReferralPage() {
                 </div>
                 <div>
                   <p className="text-white font-bold">Unclaimed Rewards</p>
-                  <p className="text-hive-gold font-black text-xl">{unclaimedHive} Hive</p>
+                  <p className="text-hive-gold font-black text-xl">{unclaimedHive} coins</p>
                 </div>
               </div>
               <motion.button
@@ -198,7 +198,7 @@ export default function ReferralPage() {
               <div className="pb-4">
                 <div className="flex items-center gap-2">
                   <p className="text-white font-semibold text-sm">{step.label}</p>
-                  <span className="text-hive-gold font-black text-sm">+{step.hive} Hive</span>
+                  <p className="text-hive-gold font-black text-sm">+{step.hive} coins</span>
                 </div>
                 <p className="text-white/40 text-xs mt-0.5">{step.sub}</p>
               </div>
@@ -206,7 +206,7 @@ export default function ReferralPage() {
           ))}
           <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between">
             <span className="text-white/50 font-semibold text-sm">Total per referral</span>
-            <span className="text-hive-gold font-black text-lg">150 Hive</span>
+            <span className="text-hive-gold font-black text-lg">1,500 coins</span>
           </div>
           <p className="text-white/30 text-xs mt-2">⚠️ Referral must complete milestones within 48 hours</p>
         </GlassCard>
@@ -247,7 +247,7 @@ export default function ReferralPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     {ref.total_hive_earned > 0 && (
-                      <span className="text-hive-gold text-xs font-bold">+{ref.total_hive_earned}H</span>
+                      <span className="text-hive-gold text-xs font-bold">+{ref.total_hive_earned} coins</span>
                     )}
                     <div className={`flex items-center gap-1 px-2 py-1 rounded-full ${cfg.bg}`}>
                       <Icon size={10} className={cfg.color} />

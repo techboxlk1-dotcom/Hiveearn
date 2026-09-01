@@ -46,8 +46,8 @@ export default function WalletPage() {
   const feePercent = usdtAmount * 0.05;
   const totalFee = feeFixed + feePercent;
   const netAmount = Math.max(0, usdtAmount - totalFee);
-  const minWithdrawHive = requirements ? Math.ceil(requirements.minAmount / 0.0001) : 800;
-  const maxWithdrawHive = requirements ? Math.floor(requirements.maxAmount / 0.0001) : 5000;
+  const minWithdrawHive = requirements ? Math.ceil(requirements.minAmount / 0.00001) : 1000;
+  const maxWithdrawHive = requirements ? Math.floor(requirements.maxAmount / 0.00001) : 50000;
 
   const handleSaveWallet = async () => {
     if (!user || saving) return;
@@ -166,7 +166,7 @@ export default function WalletPage() {
         {view === 'main' && (
           <motion.div key="main" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} className="space-y-4">
             <GlassCard gold glow className="p-5 text-center">
-              <p className="text-white/40 text-xs font-semibold uppercase tracking-widest mb-3">Hive Balance</p>
+              <p className="text-white/40 text-xs font-semibold uppercase tracking-widest mb-3">Coin Balance</p>
               <HiveBalance amount={user.hive_balance} size="xl" />
               <div className="mt-3 flex items-center justify-center gap-2">
                 <span className="text-white/30 text-xs">≈</span>
@@ -235,11 +235,11 @@ export default function WalletPage() {
                 <h3 className="text-white/60 text-xs font-semibold uppercase tracking-widest">Converter</h3>
               </div>
               <div className="flex items-center gap-3 p-3 bg-white/[0.04] rounded-xl">
-                <span className="text-hive-gold font-bold">{user.hive_balance.toLocaleString()} HIVE</span>
+                <span className="text-hive-gold font-bold">{user.hive_balance.toLocaleString()} coins</span>
                 <span className="text-white/30 text-sm">=</span>
                 <span className="text-green-400 font-bold">{formatUsdt(hiveToUsdt(user.hive_balance))} USDT</span>
               </div>
-              <p className="text-white/20 text-[10px] mt-2">Rate: 100 Hive = $0.01 USDT</p>
+              <p className="text-white/20 text-[10px] mt-2">Rate: 1,000 coins = $0.01 USDT</p>
             </GlassCard>
 
             {/* Withdrawal history */}
@@ -268,7 +268,7 @@ export default function WalletPage() {
                         </div>
                         <div className="flex items-center justify-between text-[10px]">
                           <span className="text-white/30 font-mono">{truncateAddress(wd.wallet_address)}</span>
-                          <span className="text-white/20">{(wd as { hive_amount: number }).hive_amount?.toLocaleString() ?? 0} HIVE</span>
+                          <span className="text-white/20">{(wd as { hive_amount: number }).hive_amount?.toLocaleString() ?? 0} coins</span>
                         </div>
                         {(wd as { txid?: string }).txid && (
                           <div className="flex items-center gap-1 mt-1.5">
@@ -476,13 +476,13 @@ export default function WalletPage() {
                 </div>
               </div>
 
-              <label className="text-white/40 text-xs font-semibold uppercase tracking-widest mb-2 block">Hive Amount</label>
+              <label className="text-white/40 text-xs font-semibold uppercase tracking-widest mb-2 block">Coin Amount</label>
               <div className="flex gap-2 mb-4">
                 <input
                   type="number"
                   value={withdrawAmount}
                   onChange={e => setWithdrawAmount(e.target.value)}
-                  placeholder={`Min ${minWithdrawHive} HIVE ($${requirements?.minAmount ?? 0.08} USDT)`}
+                  placeholder={`Min ${minWithdrawHive} coins (${requirements?.minAmount ?? 0.01} USDT)`}
                   min={minWithdrawHive}
                   max={Math.min(user.hive_balance, maxWithdrawHive)}
                   className="flex-1 px-4 py-3 bg-white/[0.06] border border-white/10 rounded-xl text-white text-sm placeholder:text-white/20 focus:outline-none focus:border-hive-gold/40 transition-all"
@@ -514,7 +514,7 @@ export default function WalletPage() {
                 disabled={!savedWallet || hiveAmount < minWithdrawHive || hiveAmount > user.hive_balance || hiveAmount > maxWithdrawHive || withdrawing}
                 className="btn-hive w-full py-4 font-black rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {withdrawing ? 'Processing...' : hiveAmount < minWithdrawHive ? `Min ${minWithdrawHive} HIVE ($${requirements?.minAmount ?? 0.08} USDT)` : 'Request Withdrawal'}
+                {withdrawing ? 'Processing...' : hiveAmount < minWithdrawHive ? `Min ${minWithdrawHive} coins (${requirements?.minAmount ?? 0.01} USDT)` : 'Request Withdrawal'}
               </motion.button>
               <p className="text-white/20 text-xs text-center mt-2">Reviewed by admin within 24 hours</p>
             </GlassCard>

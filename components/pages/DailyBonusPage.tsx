@@ -53,7 +53,7 @@ export default function DailyBonusPage() {
         const now = new Date().toISOString();
         setLastClaim(now);
         setHistory(prev => [{ id: 'new', user_id: user.id, hive_earned: result.hive, streak_day: (prev.length) + 1, claimed_at: now }, ...prev]);
-        toast.success(`+${result.hive} Hive earned!`, { icon: '🍯' });
+        toast.success(`+${result.hive} coins earned!`, { icon: '🎁' });
         showReward(result.hive, 'Daily Bonus!', 'Come back tomorrow for more', '🎁');
         setTimeout(() => { setClaimed(false); setShowConfetti(false); }, 3000);
       } else {
@@ -114,7 +114,7 @@ export default function DailyBonusPage() {
           </motion.div>
 
           <h2 className="text-white font-black text-2xl mb-1">Daily Bonus</h2>
-          <p className="text-hive-gold font-bold text-xl mb-4">+10 HIVE</p>
+          <p className="text-hive-gold font-bold text-xl mb-4">+100 coins</p>
 
           {/* Streak */}
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/[0.06] rounded-full mb-6">
@@ -162,7 +162,7 @@ export default function DailyBonusPage() {
                   </span>
                 ) : (
                   <span className="flex items-center justify-center gap-2">
-                    <Gift size={20} /> Claim 10 Hive
+                    <Gift size={20} /> Claim 100 Coins
                   </span>
                 )}
               </motion.button>
@@ -198,7 +198,7 @@ export default function DailyBonusPage() {
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDone ? 'bg-hive-gold text-black' : isToday ? 'border-2 border-hive-gold/50 bg-hive-gold/10' : 'bg-white/[0.05]'}`}>
                     {isDone ? <CheckCircle size={14} /> : <span className="text-white/20 text-xs">—</span>}
                   </div>
-                  <span className="text-hive-gold text-[9px] font-bold">{isDone ? '+10' : ''}</span>
+                  <span className="text-hive-gold text-[9px] font-bold">{isDone ? '+100' : ''}</span>
                 </div>
               );
             })}
@@ -222,7 +222,7 @@ export default function DailyBonusPage() {
                     <p className="text-white/30 text-[10px]">{timeAgo(claim.claimed_at)}</p>
                   </div>
                 </div>
-                <span className="text-hive-gold font-bold text-sm">+{claim.hive_earned} H</span>
+                <span className="text-hive-gold font-bold text-sm">+{claim.hive_earned} coins</span>
               </div>
             ))}
           </GlassCard>
