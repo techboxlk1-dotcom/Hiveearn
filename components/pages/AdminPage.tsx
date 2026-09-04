@@ -8,11 +8,11 @@ import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import { supabase } from '@/lib/supabase';
 import type { User, Withdrawal, RewardCode, Task, Announcement, FraudLog, AdminLog } from '@/lib/supabase';
-import { getAllUsers, approveWithdrawal, rejectWithdrawal, autoApproveWithdrawal, createRewardCode, suspendUser, unsuspendUser, createAnnouncement, createTask, updateTask, getAdminStats, blockIp, broadcastMessage, createAdProvider, updateAdProvider, deleteAdProvider, updateAppSetting, getAppSettings, setManager, listUser, unlistUser, getUserActivity, createGiveaway, updateGiveaway, endGiveaway, getAllGiveaways, generateMonthlyLeaderboard, sendBotMessage, uploadToImgbb } from '@/lib/api';
+import { getAllUsers, approveWithdrawal, rejectWithdrawal, autoApproveWithdrawal, createRewardCode, suspendUser, unsuspendUser, createAnnouncement, createTask, updateTask, getAdminStats, blockIp, broadcastMessage, createAdProvider, updateAdProvider, deleteAdProvider, updateAppSetting, getAppSettings, setManager, listUser, unlistUser, getUserActivity, generateMonthlyLeaderboard, sendBotMessage, uploadToImgbb } from '@/lib/api';
 import { formatHive, formatUsdt, hiveToUsdt, timeAgo, truncateAddress } from '@/lib/utils';
 import { toast } from 'sonner';
 
-type AdminSection = 'dashboard' | 'users' | 'withdrawals' | 'reward_codes' | 'tasks' | 'announcements' | 'fraud' | 'logs' | 'broadcast' | 'ad_messages' | 'ads' | 'visit_sites' | 'giveaways' | 'leaderboard' | 'settings';
+type AdminSection = 'dashboard' | 'users' | 'withdrawals' | 'reward_codes' | 'tasks' | 'announcements' | 'fraud' | 'logs' | 'broadcast' | 'ad_messages' | 'ads' | 'visit_sites' | 'leaderboard' | 'settings';
 
 export default function AdminPage() {
   const { user, isAdmin, isManager } = useUser();
@@ -275,7 +275,7 @@ function AdminUsers({ adminId }: { adminId: string }) {
               <div className="flex justify-between"><span className="text-white/40">Tasks</span><span className="text-green-400 font-bold">+{(activity as any).taskEarnings?.toFixed(1) || 0} coins</span></div>
               <div className="flex justify-between"><span className="text-white/40">Daily Bonus</span><span className="text-blue-400 font-bold">+{(activity as any).dailyBonusEarnings?.toFixed(1) || 0} coins</span></div>
               <div className="flex justify-between"><span className="text-white/40">Reward Codes</span><span className="text-purple-400 font-bold">+{(activity as any).rewardCodeEarnings?.toFixed(1) || 0} coins</span></div>
-              <div className="flex justify-between"><span className="text-white/40">Website Visits</span><span class="text-cyan-400 font-bold">+{(activity as any).websiteVisitEarnings?.toFixed(1) || 0} coins</span></div>
+              <div className="flex justify-between"><span className="text-white/40">Website Visits</span><span className="text-cyan-400 font-bold">+{(activity as any).websiteVisitEarnings?.toFixed(1) || 0} coins</span></div>
               <div className="flex justify-between border-t border-white/[0.06] pt-1"><span className="text-white/60 font-semibold">Total Earned</span><span className="text-white font-bold">+{(activity as any).totalCalculatedEarnings?.toFixed(1) || 0} coins</span></div>
               <div className="flex justify-between"><span className="text-white/40">Withdrawn</span><span className="text-red-400 font-bold">-{(activity as any).totalWithdrawnHive?.toFixed(1) || 0} coins</span></div>
             </div>
@@ -1101,7 +1101,7 @@ function AdminAdMessages({ adminId }: { adminId: string }) {
         <div className="flex flex-wrap gap-2">
           {[
             { label: 'VPN Notice', text: '📡 Adsgram AI ads not available in your region? Use a VPN to change your location and try again. Other ad networks work without VPN.' },
-            { label: 'New Network', text: '🎉 New ad network added! Watch more ads to earn extra Baby Hive for giveaways.' },
+            { label: 'New Network', text: '🎉 New ad network added! Watch more ads to earn extra coins.' },
             { label: 'Ad Issue', text: '⚠️ If ads are not playing, please try again in a few minutes. Make sure your internet connection is stable.' },
           ].map(tpl => (
             <motion.button
@@ -1234,7 +1234,7 @@ function AdminAds({ adminId }: { adminId: string }) {
             <div key={p.id} className="flex items-center gap-2 p-3">
               <div className="flex-1 min-w-0">
                 <p className={`text-xs font-semibold ${p.is_active ? 'text-white/80' : 'text-white/30 line-through'}`}>{p.name}</p>
-                <p className="text-white/40 text-[10px]">{p.reward_per_ad} {type === 'hive' ? '🍯' : '🍼'}/ad • {p.daily_limit}/day {p.block_id && <span className="text-blue-400">• {p.block_id}</span>}</p>
+                <p className="text-white/40 text-[10px]">{p.reward_per_ad} coins/ad • {p.daily_limit}/day {p.block_id && <span className="text-blue-400">• {p.block_id}</span>}</p>
                 {p.min_watch_seconds && <p className="text-white/30 text-[9px]">Min watch: {p.min_watch_seconds}s • {p.network_type}</p>}
               </div>
               <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleEdit(p)} className="px-2 py-1 rounded-lg bg-blue-500/15 text-blue-400 text-[10px] font-bold">
@@ -1261,17 +1261,10 @@ function AdminAds({ adminId }: { adminId: string }) {
 
       {showForm && (
         <GlassCard className="p-4 space-y-3" animate={false}>
-          <div>
-            <label className="text-white/40 text-[10px] uppercase tracking-wider block mb-1">Reward Type</label>
-            <select value={form.reward_type} onChange={e => setForm(f => ({ ...f, reward_type: e.target.value }))} className="w-full px-3 py-2.5 bg-white/[0.06] border border-white/[0.08] rounded-xl text-white text-xs focus:outline-none">
-              <option value="hive">🍯 Hive (Earn tab)</option>
-              <option value="baby_hive">🍼 Baby Hive (Giveaway tab)</option>
-            </select>
-          </div>
           {[
             { key: 'name', label: 'Provider Name *', placeholder: 'e.g. Adsgram', type: 'text' },
             { key: 'block_id', label: 'Block ID', placeholder: 'e.g. 36138 or int-36139', type: 'text' },
-            { key: 'reward_per_ad', label: form.reward_type === 'baby_hive' ? 'Baby Hive per Ad *' : 'Hive per Ad *', placeholder: 'e.g. 100', type: 'number' },
+            { key: 'reward_per_ad', label: 'Coins per Ad *', placeholder: 'e.g. 100', type: 'number' },
             { key: 'daily_limit', label: 'Daily Limit', placeholder: 'e.g. 100', type: 'number' },
             { key: 'min_watch_seconds', label: 'Min Watch Seconds', placeholder: 'e.g. 10', type: 'number' },
             { key: 'sdk_zone', label: 'SDK Zone', placeholder: 'e.g. 11196790', type: 'text' },
@@ -1301,8 +1294,7 @@ function AdminAds({ adminId }: { adminId: string }) {
         </GlassCard>
       )}
 
-      {renderProviderList('hive', 'Hive Ads', '🍯')}
-      {renderProviderList('baby_hive', 'Baby Hive Ads', '🍼')}
+      {renderProviderList('hive', 'Coin Ads', '🐝')}
     </div>
   );
 }
@@ -1376,7 +1368,7 @@ function AdminVisitSites({ adminId }: { adminId: string }) {
             <div className="flex-1 min-w-0">
               <p className={`text-xs font-semibold ${s.is_active ? 'text-white/80' : 'text-white/30 line-through'}`}>{s.title}</p>
               <p className="text-white/40 text-[10px] truncate">{s.url}</p>
-              <p className="text-hive-gold text-[10px]">+{s.reward_hive} Hive per visit</p>
+              <p className="text-hive-gold text-[10px]">+{s.reward_hive} coins per visit</p>
             </div>
             <motion.button whileTap={{ scale: 0.85 }} onClick={() => handleToggle(s)} className={`px-2 py-1 rounded-lg text-[10px] font-bold ${s.is_active ? 'bg-green-500/15 text-green-400' : 'bg-white/[0.06] text-white/40'}`}>
               {s.is_active ? 'Active' : 'Off'}
@@ -1427,10 +1419,10 @@ function AdminSettings({ adminId }: { adminId: string }) {
     { key: 'min_withdraw_usdt', label: 'Min Withdrawal (USDT)', placeholder: 'e.g. 0.08' },
     { key: 'withdraw_fee_fixed', label: 'Withdraw Fee Fixed (USDT)', placeholder: 'e.g. 0.01' },
     { key: 'withdraw_fee_percent', label: 'Withdraw Fee Percent', placeholder: 'e.g. 5' },
-    { key: 'referral_join_reward', label: 'Referral Join Reward (Hive)', placeholder: 'e.g. 25' },
-    { key: 'referral_first_ads_reward', label: 'Referral First Ads Reward (Hive)', placeholder: 'e.g. 50' },
-    { key: 'referral_second_day_reward', label: 'Referral Second Day Reward (Hive)', placeholder: 'e.g. 75' },
-    { key: 'daily_bonus_amount', label: 'Daily Bonus (Hive)', placeholder: 'e.g. 10' },
+    { key: 'referral_join_reward', label: 'Referral Join Reward (coins)', placeholder: 'e.g. 250' },
+    { key: 'referral_first_ads_reward', label: 'Referral First Ads Reward (coins)', placeholder: 'e.g. 500' },
+    { key: 'referral_second_day_reward', label: 'Referral Second Day Reward (coins)', placeholder: 'e.g. 750' },
+    { key: 'daily_bonus_amount', label: 'Daily Bonus (coins)', placeholder: 'e.g. 100' },
     { key: 'withdraw_req_daily_ads', label: 'Required Daily Ads for Withdraw', placeholder: 'e.g. 20' },
     { key: 'withdraw_req_refers', label: 'Required Referrals for Withdraw', placeholder: 'e.g. 2' },
     { key: 'withdraw_req_main_tasks', label: 'Required Main Tasks for Withdraw', placeholder: 'e.g. true' },
@@ -1439,7 +1431,6 @@ function AdminSettings({ adminId }: { adminId: string }) {
     { key: 'auto_withdraw_wallet', label: 'Auto Withdraw Trust Wallet', placeholder: '0x...' },
     { key: 'daily_reminder_enabled', label: 'Daily Reminders Enabled', placeholder: 'true/false' },
     { key: 'daily_reminder_interval_hours', label: 'Reminder Interval (hours)', placeholder: 'e.g. 4' },
-    { key: 'mining_rate_per_hour', label: 'Mining Rate (Hive/hour)', placeholder: 'e.g. 20' },
     { key: 'broadcast_to_channel', label: 'Broadcast to Channel', placeholder: 'true/false' },
   ];
 

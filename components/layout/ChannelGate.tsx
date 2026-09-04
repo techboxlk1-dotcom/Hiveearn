@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, Loader2, RefreshCw, Users, CreditCard, AlertCircle } from 'lucide-react';
 import { useUser } from '@/contexts/UserContext';
 import { checkRequiredChannelMembership, REQUIRED_CHANNELS } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 
 interface ChannelGateProps {
   children: React.ReactNode;
@@ -16,6 +17,42 @@ export default function ChannelGate({ children }: ChannelGateProps) {
   const [result, setResult] = useState<{ community: boolean; payments: boolean } | null>(null);
   const [verified, setVerified] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Check if user has previously verified channels
+  useEffect(() => {
+    if (!user) return;
+    // Skip gate for admins/managers
+    if (user.is_admin || user.is_manager) {
+      setVerified(true);
+      setLoading(false);
+      return;
+    }
+
+    // Check if user has previously verified
+    const checkPrevious = async () => {
+      // New users (created within last 5 minutes) always see the gate
+      const createdAt = new Date(user.created_at).getTime();
+      const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+      const isNewUser = createdAt > fiveMinAgo;
+
+      if (!isNewUser) {
+        // For existing users, check channel membership silently
+        try {
+          const res = await checkRequiredChannelMembership(user.telegram_id);
+          if (res.community && res.payments) {
+            setVerified(true);
+          }
+          // If not in channels, the gate will show (they may have left)
+        } catch {
+          // On error, allow access for existing users (don't block them)
+          setVerified(true);
+        }
+      }
+      setLoading(false);
+    };
+    checkPrevious();
+  }, [user]);
 
   const runCheck = useCallback(async () => {
     if (!user) return;
@@ -34,14 +71,8 @@ export default function ChannelGate({ children }: ChannelGateProps) {
     }
   }, [user]);
 
-  // Admins/managers skip the gate
-  if (!user || user.is_admin || user.is_manager) {
-    return <>{children}</>;
-  }
-
-  if (verified) {
-    return <>{children}</>;
-  }
+  if (loading) return <>{children}</>;
+  if (verified) return <>{children}</>;
 
   const communityOk = result?.community ?? false;
   const paymentsOk = result?.payments ?? false;
@@ -59,9 +90,10 @@ export default function ChannelGate({ children }: ChannelGateProps) {
           <motion.div
             animate={{ y: [0, -6, 0] }}
             transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-            className="w-20 h-20 mx-auto mb-4 rounded-3xl bg-hive-gold/10 border border-hive-gold/30 flex items-center justify-center"
+            className="w-20 h-20 mx-auto mb-4 rounded-full overflow-hidden border-2 border-hive-gold/50"
           >
-            <span className="text-4xl">🐝</span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/images/IMG_20260901_111414_330.jpg" alt="Hive Earn" className="w-full h-full object-cover" />
           </motion.div>
           <h1 className="text-white font-black text-2xl mb-2">Join Our Channels</h1>
           <p className="text-white/50 text-sm leading-relaxed">

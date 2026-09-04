@@ -50,8 +50,8 @@ export async function checkRequiredChannelMembership(userId: number): Promise<{ 
 export async function sendWelcomeMessage(telegramId: number, firstName: string, username?: string): Promise<void> {
   const text = `🐝 <b>Welcome to Hive Earn V2, ${firstName}!</b>\n\n` +
     `A cleaner way to earn USDT from your Telegram mini app. Your balance now uses <b>Hive Coins</b>: <b>1,000 coins = $0.01 USDT</b>.\n\n` +
-    `<b>Earn in V2:</b>\n📺 Watch verified ads • ⛏️ Mine 100 coins per session • ✅ Complete tasks\n🎁 Claim your daily bonus • ⚡ Redeem codes • 👥 Invite friends\n\n` +
-    `<b>Mining:</b> 1 hour per session, up to 10 claims per day.\n<b>Withdrawal:</b> From 1,000 coins ($0.01) | BSC (BEP20)\n\nJoin both required channels, verify, and start earning!`;
+    `<b>Earn in V2:</b>\n📺 Watch verified ads • ✅ Complete tasks\n🎁 Claim your daily bonus • ⚡ Redeem codes • 👥 Invite friends\n\n` +
+    `<b>Withdrawal:</b> First withdrawal from $0.10 (10,000 coins) | Second+ from $0.20 (20,000 coins) | BSC (BEP20)\n\nJoin both required channels, verify, and start earning!`;
   await sendBotMessage(telegramId, text, true, true); // Include banner and community/payment buttons
 }
 
@@ -215,11 +215,11 @@ export async function upsertUser(telegramData: {
       const deadline = new Date(); deadline.setHours(deadline.getHours() + 48);
       await supabase.from('referrals').insert({ referrer_id: referredBy, referred_id: newUser.id, status: 'pending', deadline_at: deadline.toISOString() });
       // Credit to unclaimed referral pool instead of direct balance
-      await creditReferralHive(referredBy, 25, '🍯 New referral joined');
-      await createNotification(referredBy, 'referral', '🐝 New Referral!', `Someone joined using your referral link. +25 🍯 Hive earned! Claim from Refer tab.`);
+      await creditReferralHive(referredBy, 250, 'New referral joined');
+      await createNotification(referredBy, 'referral', 'New Referral!', `Someone joined using your referral link. +250 coins earned! Claim from Refer tab.`);
       const { data: referrerUser } = await supabase.from('users').select('telegram_id, first_name').eq('id', referredBy).maybeSingle();
       if (referrerUser) {
-        await sendBotMessage(referrerUser.telegram_id, `🐝 <b>New Referral Joined!</b>\n\n${newUser.first_name} joined using your referral link.\n\n💰 You earned <b>+25 🍯 Hive</b>! (Claim from Refer tab)\n\nThey need to watch ads to unlock more rewards for you.`);
+        await sendBotMessage(referrerUser.telegram_id, `🐝 <b>New Referral Joined!</b>\n\n${newUser.first_name} joined using your referral link.\n\n💰 You earned <b>+250 coins</b>! (Claim from Refer tab)\n\nThey need to watch ads to unlock more rewards for you.`);
       }
     } else if (referredBy && sameIpReferral) {
       const deadline = new Date(); deadline.setHours(deadline.getHours() + 48);
@@ -273,9 +273,9 @@ export async function claimReferralRewards(userId: string): Promise<{ success: b
   }
   const amount = Math.floor(user.unclaimed_referral_hive * 100) / 100;
   await supabase.from('users').update({ hive_balance: user.hive_balance + amount, unclaimed_referral_hive: 0 }).eq('id', userId);
-  await supabase.from('transactions').insert({ user_id: userId, type: 'referral', amount, description: '🍯 Referral rewards claimed', status: 'completed' });
-  await createNotification(userId, 'referral', '🍯 Referral Rewards Claimed!', `You claimed ${amount} 🍯 Hive from referral rewards!`);
-  return { success: true, hive: amount, message: `+${amount} Hive claimed!` };
+  await supabase.from('transactions').insert({ user_id: userId, type: 'referral', amount, description: 'Referral rewards claimed', status: 'completed' });
+  await createNotification(userId, 'referral', 'Referral Rewards Claimed!', `You claimed ${amount} coins from referral rewards!`);
+  return { success: true, hive: amount, message: `+${amount} coins claimed!` };
 }
 
 // ─── Daily Bonus ─────────────────────────────────────────────────────────────

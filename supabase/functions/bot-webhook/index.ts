@@ -157,10 +157,10 @@ async function getAllUserTelegramIds(): Promise<number[]> {
 }
 
 const reminderMessages = [
-  "🐝 <b>Don't forget to earn your Hive today!</b>\n\n📺 Watch ads\n🎁 Claim daily bonus\n✅ Complete tasks\n\nYour Hive balance is waiting! Tap below to open the app.",
-  "🍯 <b>Your Hive tokens are waiting!</b>\n\nCome back and earn more Hive by:\n📺 Watching ads\n👥 Referring friends\n🎁 Daily bonus\n\nKeep your streak alive!",
+  "🐝 <b>Don't forget to earn your coins today!</b>\n\n📺 Watch ads\n🎁 Claim daily bonus\n✅ Complete tasks\n\nYour coin balance is waiting! Tap below to open the app.",
+  "💰 <b>Your coins are waiting!</b>\n\nCome back and earn more by:\n📺 Watching ads\n👥 Referring friends\n🎁 Daily bonus\n\nKeep your streak alive!",
   "🚀 <b>Ready to earn more?</b>\n\nNew ads and tasks are available!\nDon't miss out on your daily bonus.\n\nTap to open Hive Earn now!",
-  "💰 <b>Earn while you sleep? Almost!</b>\n\nJust a few taps a day keeps the Hive growing.\nWatch ads, do tasks, claim bonus.\n\nOpen the app below!",
+  "💰 <b>Earn while you sleep? Almost!</b>\n\nJust a few taps a day keeps the coins growing.\nWatch ads, do tasks, claim bonus.\n\nOpen the app below!",
   "🐝 <b>Hive Earn Reminder</b>\n\nYour friends are earning right now!\nDon't miss today's rewards.\n\n📺 Watch ads\n🎁 Daily bonus\n✅ Tasks\n\nTap below to start earning!",
 ];
 
@@ -208,13 +208,13 @@ Deno.serve(async (req: Request) => {
         `A cleaner, faster way to earn USDT from your Telegram mini app. Your balance now uses <b>Hive Coins</b>: <b>1,000 coins = $0.01 USDT</b>.\n\n` +
         `<b>How to earn coins:</b>\n` +
         `📺 Watch ads — earn coins per ad (Earn tab)\n` +
-        `⛏️ Mining — 100 coins per 1-hour session, up to 10 claims/day\n` +
         `✅ Complete tasks — social media tasks with rewards\n` +
         `🎁 Daily bonus — claim every 24 hours\n` +
         `⚡ Reward codes — redeem codes for bonus coins\n` +
         `👥 Refer friends — earn up to 1,500 coins per referral + 5% commission\n\n` +
         `<b>Withdrawal:</b>\n` +
-        `Minimum: 1,000 coins ($0.01 USDT) | Network: BSC (BEP20)\n\n` +
+        `First withdrawal: $0.10 (10,000 coins) | Second+: $0.20 (20,000 coins)\n` +
+        `Network: BSC (BEP20)\n\n` +
         `⚠️ You must join both our Community and Payment channels to use the app.\n\n` +
         `Tap the button below to open the mini app and start earning! 🚀`;
 
@@ -239,10 +239,11 @@ Deno.serve(async (req: Request) => {
         `/start — Open Hive Earn V2 mini app\n` +
         `/help — Show this help message\n\n` +
         `<b>Earn coins by:</b>\n` +
-        `📺 Watching ads (Earn tab)\n⛏️ Mining — 100 coins/session, 10 claims/day\n✅ Completing tasks\n🎁 Daily bonus\n⚡ Reward codes\n👥 Referring friends (1,500 coins + 5% commission)\n\n` +
+        `📺 Watching ads (Earn tab)\n✅ Completing tasks\n🎁 Daily bonus\n⚡ Reward codes\n👥 Referring friends (1,500 coins + 5% commission)\n\n` +
         `<b>Coin Value:</b> 1,000 coins = $0.01 USDT\n` +
         `<b>Withdrawal:</b>\n` +
-        `Minimum: 1,000 coins ($0.01 USDT) | Network: BSC (BEP20)\n\n` +
+        `Minimum: First withdrawal $0.10 (10,000 coins) | Second+ $0.20 (20,000 coins)\n` +
+        `Network: BSC (BEP20)\n\n` +
         `<b>Required:</b> Join both Community and Payment channels to use the app.\n\n` +
         `<b>Support:</b> @hiveearnsupport\n` +
         `<b>Community:</b> @${COMMUNITY_CHANNEL}\n` +
