@@ -213,7 +213,7 @@ Deno.serve(async (req: Request) => {
         `⚡ Reward codes — redeem codes for bonus coins\n` +
         `👥 Refer friends — earn up to 1,500 coins per referral + 5% commission\n\n` +
         `<b>Withdrawal:</b>\n` +
-        `First withdrawal: $0.10 (10,000 coins) | Second+: $0.20 (20,000 coins)\n` +
+        `Minimum withdrawal: 10,000 coins ($0.1 USDT) | Second+: 20,000 coins ($0.2 USDT)\n` +
         `Network: BSC (BEP20)\n\n` +
         `⚠️ You must join both our Community and Payment channels to use the app.\n\n` +
         `Tap the button below to open the mini app and start earning! 🚀`;
@@ -242,7 +242,7 @@ Deno.serve(async (req: Request) => {
         `📺 Watching ads (Earn tab)\n✅ Completing tasks\n🎁 Daily bonus\n⚡ Reward codes\n👥 Referring friends (1,500 coins + 5% commission)\n\n` +
         `<b>Coin Value:</b> 1,000 coins = $0.01 USDT\n` +
         `<b>Withdrawal:</b>\n` +
-        `Minimum: First withdrawal $0.10 (10,000 coins) | Second+ $0.20 (20,000 coins)\n` +
+        `Minimum: 10,000 coins ($0.1 USDT) | Second+ 20,000 coins ($0.2 USDT)\n` +
         `Network: BSC (BEP20)\n\n` +
         `<b>Required:</b> Join both Community and Payment channels to use the app.\n\n` +
         `<b>Support:</b> @hiveearnsupport\n` +

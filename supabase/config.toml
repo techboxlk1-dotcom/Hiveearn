@@ -1,0 +1,17 @@
+[functions.bot-webhook]
+verify_jwt = false
+
+[functions.send-bot-message]
+verify_jwt = false
+
+[functions.check-membership]
+verify_jwt = false
+
+[functions.daily-reminder]
+verify_jwt = false
+
+[functions.check-referral-expiry]
+verify_jwt = false
+
+[functions.process-auto-withdraw]
+verify_jwt = false
