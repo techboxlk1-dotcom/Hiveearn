@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, History, Users, Trophy, Bell, Globe, ChevronRight, Shield, ExternalLink, Info, Check, X } from 'lucide-react';
+import { Wallet, History, Users, Trophy, Globe, ChevronRight, Shield, ExternalLink, Info, Check, X } from 'lucide-react';
 import Link from 'next/link';
 import { useUser } from '@/contexts/UserContext';
 import { useLanguage, supportedLanguages } from '@/contexts/LanguageContext';
@@ -55,7 +55,6 @@ export default function ProfilePage() {
     {
       title: 'Preferences',
       items: [
-        { icon: Bell, label: t('profile.notifications'), href: '/notifications', color: 'text-yellow-400', bg: 'bg-yellow-400/10' },
         { icon: Globe, label: t('profile.language'), href: '#', color: 'text-white/60', bg: 'bg-white/10', badge: supportedLanguages.find(l => l.code === lang)?.flag ?? '🇬🇧', onClick: () => setShowLangPicker(true) },
         { icon: Info, label: t('profile.about'), href: '/about', color: 'text-white/60', bg: 'bg-white/10' },
       ],

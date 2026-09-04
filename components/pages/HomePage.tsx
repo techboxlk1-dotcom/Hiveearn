@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
-import { Bell, Gift, Trophy, Megaphone, ChevronRight, Wallet, PlayCircle, CheckSquare, Users, Zap, Copy, ExternalLink, Pickaxe, Timer, CheckCircle2, AlertCircle, RefreshCw, XCircle, Shield } from 'lucide-react';
+import { Gift, Trophy, Megaphone, ChevronRight, Wallet, PlayCircle, CheckSquare, Users, Zap, Copy, ExternalLink, Pickaxe, Timer, CheckCircle2, AlertCircle, RefreshCw, XCircle, Shield } from 'lucide-react';
 import { useUser } from '@/contexts/UserContext';
 import GlassCard from '@/components/ui/GlassCard';
 import HiveBalance from '@/components/ui/HiveBalance';
@@ -118,7 +118,7 @@ const item = {
 };
 
 export default function HomePage() {
-  const { user, unreadCount } = useUser();
+  const { user } = useUser();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const { showAutoAd, startAdWithTimer, getMinWatchTime } = useAds();
@@ -285,16 +285,7 @@ export default function HomePage() {
             <p className="text-white font-bold text-sm">{displayName}</p>
           </div>
         </div>
-        <Link href="/notifications">
-          <motion.div whileTap={{ scale: 0.9 }} className="relative w-10 h-10 rounded-xl glass-card flex items-center justify-center">
-            <Bell size={18} className="text-white/70" />
-            {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-hive-gold text-black text-[10px] font-black flex items-center justify-center">
-                {unreadCount > 9 ? '9+' : unreadCount}
-              </span>
-            )}
-          </motion.div>
-        </Link>
+
       </motion.div>
 
       <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-4">

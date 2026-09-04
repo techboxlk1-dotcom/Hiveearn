@@ -400,11 +400,11 @@ async function checkReferralAdMilestones(userId: string): Promise<void> {
     const { count: totalAds } = await supabase.from('ad_watches').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('completed', true);
     if ((totalAds ?? 0) >= 10) {
       await supabase.from('referrals').update({ first_ads_reward_paid: true }).eq('id', referral.id);
-      await creditReferralHive(referral.referrer_id, 50, '🍯 Referral watched first 10 ads');
-      await createNotification(referral.referrer_id, 'referral', '🐝 Referral Milestone!', `Your referral watched their first 10 ads. +50 🍯 Hive! (Claim from Refer tab)`);
+      await creditReferralHive(referral.referrer_id, 500, '🍯 Referral watched first 10 ads');
+      await createNotification(referral.referrer_id, 'referral', '🐝 Referral Milestone!', `Your referral watched their first 10 ads. +500 coins! (Claim from Refer tab)`);
       const { data: referrerUser } = await supabase.from('users').select('telegram_id').eq('id', referral.referrer_id).maybeSingle();
       if (referrerUser) {
-        await sendBotMessage(referrerUser.telegram_id, `🐝 <b>Referral Milestone!</b>\n\nYour referral completed their first 10 ads!\n\n💰 +50 🍯 Hive earned! Claim from Refer tab.`);
+        await sendBotMessage(referrerUser.telegram_id, `🐝 <b>Referral Milestone!</b>\n\nYour referral completed their first 10 ads!\n\n💰 +500 coins earned! Claim from Refer tab.`);
       }
     }
   }
@@ -415,11 +415,11 @@ async function checkReferralAdMilestones(userId: string): Promise<void> {
     const { count: day2Ads } = await supabase.from('ad_watches').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('completed', true).gte('watched_at', yesterday.toISOString()).lte('watched_at', yesterdayEnd.toISOString());
     if ((day2Ads ?? 0) >= 10) {
       await supabase.from('referrals').update({ second_day_reward_paid: true, status: 'completed', completed_at: new Date().toISOString() }).eq('id', referral.id);
-      await creditReferralHive(referral.referrer_id, 75, '🍯 Referral completed day 2 ads');
-      await createNotification(referral.referrer_id, 'referral_completed', '🏆 Referral Completed!', `Your referral completed all milestones. +75 🍯 Hive! (Claim from Refer tab)`);
+      await creditReferralHive(referral.referrer_id, 750, '🍯 Referral completed day 2 ads');
+      await createNotification(referral.referrer_id, 'referral_completed', '🏆 Referral Completed!', `Your referral completed all milestones. +750 coins! (Claim from Refer tab)`);
       const { data: referrerUser } = await supabase.from('users').select('telegram_id').eq('id', referral.referrer_id).maybeSingle();
       if (referrerUser) {
-        await sendBotMessage(referrerUser.telegram_id, `🏆 <b>Referral Fully Completed!</b>\n\n💰 +75 🍯 Hive earned! Total earned: 150 🍯 Hive. Claim from Refer tab.`);
+        await sendBotMessage(referrerUser.telegram_id, `🏆 <b>Referral Fully Completed!</b>\n\n💰 +750 coins earned! Total earned: 1,500 coins. Claim from Refer tab.`);
       }
     }
   }
