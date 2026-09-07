@@ -12,14 +12,13 @@ interface ChannelGateProps {
 }
 
 export default function ChannelGate({ children }: ChannelGateProps) {
-  const { user } = useUser();
+  const { user, refreshUser } = useUser();
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<{ community: boolean; payments: boolean } | null>(null);
   const [verified, setVerified] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Check if user has previously verified channels
   useEffect(() => {
     if (!user) return;
     // Skip gate for admins/managers
@@ -29,29 +28,29 @@ export default function ChannelGate({ children }: ChannelGateProps) {
       return;
     }
 
-    // Check if user has previously verified
-    const checkPrevious = async () => {
-      // New users (created within last 5 minutes) always see the gate
-      const createdAt = new Date(user.created_at).getTime();
-      const fiveMinAgo = Date.now() - 5 * 60 * 1000;
-      const isNewUser = createdAt > fiveMinAgo;
+    // If user previously verified channels, skip the gate entirely
+    if (user.channels_verified) {
+      setVerified(true);
+      setLoading(false);
+      return;
+    }
 
-      if (!isNewUser) {
-        // For existing users, check channel membership silently
-        try {
-          const res = await checkRequiredChannelMembership(user.telegram_id);
-          if (res.community && res.payments) {
-            setVerified(true);
-          }
-          // If not in channels, the gate will show (they may have left)
-        } catch {
-          // On error, allow access for existing users (don't block them)
+    // New users or users who haven't verified — check channel membership
+    const checkMembership = async () => {
+      try {
+        const res = await checkRequiredChannelMembership(user.telegram_id);
+        setResult(res);
+        if (res.community && res.payments) {
+          // User is in both channels — mark as verified in DB
+          await supabase.from('users').update({ channels_verified: true }).eq('id', user.id);
           setVerified(true);
         }
+      } catch {
+        // On error, don't block — let the gate show so user can retry
       }
       setLoading(false);
     };
-    checkPrevious();
+    checkMembership();
   }, [user]);
 
   const runCheck = useCallback(async () => {
@@ -62,14 +61,17 @@ export default function ChannelGate({ children }: ChannelGateProps) {
       const res = await checkRequiredChannelMembership(user.telegram_id);
       setResult(res);
       if (res.community && res.payments) {
+        // Mark as verified in DB so gate doesn't show again
+        await supabase.from('users').update({ channels_verified: true }).eq('id', user.id);
         setVerified(true);
+        refreshUser?.();
       }
     } catch {
       setError('Unable to verify channel membership. Please try again.');
     } finally {
       setChecking(false);
     }
-  }, [user]);
+  }, [user, refreshUser]);
 
   if (loading) return <>{children}</>;
   if (verified) return <>{children}</>;

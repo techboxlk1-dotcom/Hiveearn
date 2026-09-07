@@ -57,6 +57,13 @@ export interface User {
   total_ads_watched: number;
   withdraw_unlocked_at: string | null;
   last_reminder_at: string | null;
+  channels_verified: boolean;
+  mining_started_at: string | null;
+  mining_daily_claims: number;
+  mining_last_claim_date: string | null;
+  mining_notified: boolean;
+  baby_hive_balance: number;
+  manually_unsuspended: boolean;
   created_at: string;
   updated_at: string;
 }
