@@ -14,7 +14,7 @@ interface ChannelGateProps {
 export default function ChannelGate({ children }: ChannelGateProps) {
   const { user, refreshUser } = useUser();
   const [checking, setChecking] = useState(false);
-  const [result, setResult] = useState<{ community: boolean; payments: boolean } | null>(null);
+  const [result, setResult] = useState<{ community: boolean | null; payments: boolean | null } | null>(null);
   const [verified, setVerified] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,13 +40,18 @@ export default function ChannelGate({ children }: ChannelGateProps) {
       try {
         const res = await checkRequiredChannelMembership(user.telegram_id);
         setResult(res);
-        if (res.community && res.payments) {
-          // User is in both channels — mark as verified in DB
+        // Both channels confirmed — mark verified and skip gate
+        if (res.community === true && res.payments === true) {
           await supabase.from('users').update({ channels_verified: true }).eq('id', user.id);
           setVerified(true);
         }
+        // If either is null (API error), don't block — let user through
+        if (res.community === null || res.payments === null) {
+          setVerified(true);
+        }
       } catch {
-        // On error, don't block — let the gate show so user can retry
+        // On error, don't block the user
+        setVerified(true);
       }
       setLoading(false);
     };
@@ -60,11 +65,14 @@ export default function ChannelGate({ children }: ChannelGateProps) {
     try {
       const res = await checkRequiredChannelMembership(user.telegram_id);
       setResult(res);
-      if (res.community && res.payments) {
+      if (res.community === true && res.payments === true) {
         // Mark as verified in DB so gate doesn't show again
         await supabase.from('users').update({ channels_verified: true }).eq('id', user.id);
         setVerified(true);
         refreshUser?.();
+      } else if (res.community === null || res.payments === null) {
+        // API error — can't verify, don't block
+        setError('Unable to reach Telegram. Please try again.');
       }
     } catch {
       setError('Unable to verify channel membership. Please try again.');
@@ -76,8 +84,8 @@ export default function ChannelGate({ children }: ChannelGateProps) {
   if (loading) return <>{children}</>;
   if (verified) return <>{children}</>;
 
-  const communityOk = result?.community ?? false;
-  const paymentsOk = result?.payments ?? false;
+  const communityOk = result?.community === true;
+  const paymentsOk = result?.payments === true;
 
   return (
     <div className="min-h-dvh bg-[#0A0A0A] honeycomb-bg flex flex-col items-center justify-center px-6 py-10">
@@ -186,7 +194,7 @@ export default function ChannelGate({ children }: ChannelGateProps) {
         </AnimatePresence>
 
         {/* Partial result hint */}
-        {result && !(communityOk && paymentsOk) && !checking && (
+        {result && !(communityOk && paymentsOk) && result.community !== null && result.payments !== null && !checking && (
           <div className="p-3 mb-4 rounded-xl bg-yellow-500/10 border border-yellow-500/20">
             <p className="text-yellow-300/80 text-xs text-center">
               {(!communityOk && !paymentsOk)

@@ -93,7 +93,7 @@ export default function ReferralPage() {
   const steps = [
     { hive: 250, label: 'Friend joins', sub: 'Instant reward when they sign up', done: true },
     { hive: 500, label: 'Watches 10 ads', sub: 'After first 10 ad watches', done: false },
-    { hive: 750, label: 'Day 2 milestone', sub: '10 more ads on their 2nd day', done: false },
+    { hive: 750, label: 'Day 2 milestone', sub: '15 more ads on their 2nd day', done: false },
   ];
 
   const statusConfig = {

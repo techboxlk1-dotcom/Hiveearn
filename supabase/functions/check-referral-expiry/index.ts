@@ -63,7 +63,7 @@ Deno.serve(async (req: Request) => {
 
       deactivatedCount++;
 
-      // Check if referrer had already received the initial 25 Hive reward
+      // Check if referrer had already received the initial 250 coin reward
       // If so, we need to remove it from their unclaimed_referral_hive
       const { data: referrer } = await supabase
         .from("users")
@@ -72,9 +72,9 @@ Deno.serve(async (req: Request) => {
         .maybeSingle();
 
       if (referrer && referrer.unclaimed_referral_hive > 0) {
-        // Remove the 25 Hive initial reward (since referral didn't complete)
-        // Only remove up to 25 Hive (the initial reward amount)
-        const newUnclaimed = Math.max(0, referrer.unclaimed_referral_hive - 25);
+        // Remove the 250 coin initial reward (since referral didn't complete)
+        // Only remove up to 250 coins (the initial reward amount)
+        const newUnclaimed = Math.max(0, referrer.unclaimed_referral_hive - 250);
 
         const { error: deductError } = await supabase
           .from("users")
@@ -94,7 +94,7 @@ Deno.serve(async (req: Request) => {
               },
               body: JSON.stringify({
                 chat_id: referrer.telegram_id,
-                text: `⚠️ <b>Referral Expired</b>\n\nYour referral did not complete the required milestones within 48 hours. The initial 25 Hive reward has been removed from your pending rewards.\n\nKeep sharing your referral link to earn more!`,
+                text: `⚠️ <b>Referral Expired</b>\n\nYour referral did not complete the required milestones within 48 hours. The initial 250 coin reward has been removed from your pending rewards.\n\nKeep sharing your referral link to earn more!`,
                 include_app_button: true,
               }),
             });

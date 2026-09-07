@@ -26,19 +26,21 @@ export const REQUIRED_CHANNELS = {
   payments: 'hiveearnpayment',
 } as const;
 
-export async function checkChannelMembership(userId: number, channel: string): Promise<boolean> {
+export async function checkChannelMembership(userId: number, channel: string): Promise<boolean | null> {
   try {
     const { data, error } = await supabase.functions.invoke('check-membership', {
       body: { user_id: userId, channel },
     });
-    if (error) return false;
-    return (data as { is_member?: boolean })?.is_member === true;
+    if (error) return null;
+    const result = data as { is_member?: boolean; error?: boolean };
+    if (result.error) return null;
+    return result.is_member === true;
   } catch {
-    return false;
+    return null;
   }
 }
 
-export async function checkRequiredChannelMembership(userId: number): Promise<{ community: boolean; payments: boolean }> {
+export async function checkRequiredChannelMembership(userId: number): Promise<{ community: boolean | null; payments: boolean | null }> {
   const [community, payments] = await Promise.all([
     checkChannelMembership(userId, REQUIRED_CHANNELS.community),
     checkChannelMembership(userId, REQUIRED_CHANNELS.payments),
@@ -413,7 +415,7 @@ async function checkReferralAdMilestones(userId: string): Promise<void> {
     const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1); yesterday.setHours(0, 0, 0, 0);
     const yesterdayEnd = new Date(yesterday); yesterdayEnd.setHours(23, 59, 59, 999);
     const { count: day2Ads } = await supabase.from('ad_watches').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('completed', true).gte('watched_at', yesterday.toISOString()).lte('watched_at', yesterdayEnd.toISOString());
-    if ((day2Ads ?? 0) >= 10) {
+    if ((day2Ads ?? 0) >= 15) {
       await supabase.from('referrals').update({ second_day_reward_paid: true, status: 'completed', completed_at: new Date().toISOString() }).eq('id', referral.id);
       await creditReferralHive(referral.referrer_id, 750, '🍯 Referral completed day 2 ads');
       await createNotification(referral.referrer_id, 'referral_completed', '🏆 Referral Completed!', `Your referral completed all milestones. +750 coins! (Claim from Refer tab)`);

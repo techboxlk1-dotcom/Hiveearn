@@ -29,7 +29,7 @@ Deno.serve(async (req: Request) => {
     const data = await res.json();
 
     if (!data.ok) {
-      return new Response(JSON.stringify({ is_member: false, status: "unknown", error: data.description }), {
+      return new Response(JSON.stringify({ is_member: false, status: "unknown", error: true, message: data.description }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -43,8 +43,8 @@ Deno.serve(async (req: Request) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500,
+    return new Response(JSON.stringify({ is_member: false, status: "unknown", error: true, message: String(err) }), {
+      status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
