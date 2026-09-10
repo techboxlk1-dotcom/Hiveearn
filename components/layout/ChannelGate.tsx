@@ -28,21 +28,16 @@ export default function ChannelGate({ children }: ChannelGateProps) {
       return;
     }
 
-    // If user previously verified channels, skip the gate entirely
-    if (user.channels_verified) {
-      setVerified(true);
-      setLoading(false);
-      return;
-    }
-
-    // New users or users who haven't verified — check channel membership
+    // Check channel membership every time the app opens
     const checkMembership = async () => {
       try {
         const res = await checkRequiredChannelMembership(user.telegram_id);
         setResult(res);
-        // Both channels confirmed — mark verified and skip gate
+        // Both channels confirmed — mark verified and let through
         if (res.community === true && res.payments === true) {
-          await supabase.from('users').update({ channels_verified: true }).eq('id', user.id);
+          if (!user.channels_verified) {
+            await supabase.from('users').update({ channels_verified: true }).eq('id', user.id);
+          }
           setVerified(true);
         }
         // If either is null (API error), don't block — let user through

@@ -260,65 +260,63 @@ Deno.serve(async (req: Request) => {
       // Fetch all user telegram IDs directly from the database
       const allChatIds = await getAllUserTelegramIds();
 
+      let sent = 0, failed = 0;
+
       const keyboard = button_name && button_url
         ? { inline_keyboard: [[{ text: button_name, url: button_url }], [{ text: "🐝 Open Hive Earn", web_app: { url: MINI_APP_URL } }]] }
         : getMainKeyboard();
 
-      // Send in the background via waitUntil so the edge function doesn't time out
-      // for large user bases. Return immediately to the caller.
-      EdgeRuntime.waitUntil((async () => {
-        let sent = 0, failed = 0;
+      // Send in batches of 25 to respect Telegram rate limits (~30 msg/sec)
+      for (let i = 0; i < allChatIds.length; i += 25) {
+        const batch = allChatIds.slice(i, i + 25);
+        await Promise.all(batch.map(async (cid: number) => {
+          try {
+            const p: Record<string, unknown> = { chat_id: cid, caption, parse_mode: "HTML", reply_markup: keyboard };
+            if (photo_url) p.photo = photo_url;
+            const endpoint = photo_url ? "sendPhoto" : "sendMessage";
+            if (!photo_url) {
+              p.text = caption;
+              delete p.caption;
+            }
+            const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${endpoint}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(p),
+            });
+            const d = await r.json();
+            if (d.ok) sent++; else failed++;
+          } catch { failed++; }
+        }));
+        // 500ms delay between batches to avoid rate limiting
+        if (i + 25 < allChatIds.length) await new Promise(r => setTimeout(r, 500));
+      }
 
-        // Send in batches of 25 to respect Telegram rate limits (~30 msg/sec)
-        for (let i = 0; i < allChatIds.length; i += 25) {
-          const batch = allChatIds.slice(i, i + 25);
-          await Promise.all(batch.map(async (cid: number) => {
-            try {
-              const p: Record<string, unknown> = { chat_id: cid, caption, parse_mode: "HTML", reply_markup: keyboard };
-              if (photo_url) p.photo = photo_url;
-              const endpoint = photo_url ? "sendPhoto" : "sendMessage";
-              if (!photo_url) {
-                p.text = caption;
-                delete p.caption;
-              }
-              const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${endpoint}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(p),
-              });
-              const d = await r.json();
-              if (d.ok) sent++; else failed++;
-            } catch { failed++; }
-          }));
-          // 500ms delay between batches to avoid rate limiting
-          if (i + 25 < allChatIds.length) await new Promise(r => setTimeout(r, 500));
-        }
-
-        // Post to community channel if requested
-        if (send_to_channel) {
+      // Post to both channels if requested
+      if (send_to_channel) {
+        for (const channel of [COMMUNITY_CHANNEL, PAYMENT_CHANNEL]) {
           try {
             if (photo_url) {
-              await tgSendPhotoToChannel(COMMUNITY_CHANNEL, caption, photo_url, button_name, button_url);
+              await tgSendPhotoToChannel(channel, caption, photo_url, button_name, button_url);
             } else {
-              await tgSendMessageToChannel(COMMUNITY_CHANNEL, caption, button_name, button_url);
+              await tgSendMessageToChannel(channel, caption, button_name, button_url);
             }
           } catch { /* ignore channel errors */ }
         }
+      }
 
-        // Log broadcast result to admin
-        try {
-          const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-            auth: { persistSession: false, autoRefreshToken: false },
-          });
-          await supabase.from("admin_logs").insert({
-            admin_id: "system",
-            action: "broadcast_result",
-            new_data: { sent, failed, total: allChatIds.length },
-          });
-        } catch { /* ignore */ }
-      })());
+      // Log broadcast result
+      try {
+        const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        await supabase.from("admin_logs").insert({
+          admin_id: "system",
+          action: "broadcast_result",
+          new_data: { sent, failed, total: allChatIds.length },
+        });
+      } catch { /* ignore */ }
 
-      return new Response(JSON.stringify({ ok: true, sent: 0, failed: 0, total: allChatIds.length, message: "Broadcast started in background" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ ok: true, sent, failed, total: allChatIds.length }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // Handle daily reminder
@@ -390,4 +388,5 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });
+
 

@@ -181,6 +181,35 @@ export async function upsertUser(telegramData: {
       updated_at: new Date().toISOString(),
     };
     if (telegramData.ip_address) updates.ip_address = telegramData.ip_address;
+
+    // Existing v1 users may not have a referral code — generate one if missing
+    if (!existing.referral_code) {
+      updates.referral_code = generateReferralCode(telegramData.telegram_id);
+    }
+
+    // If this existing user arrived via a referral link and hasn't been referred yet, process it
+    if (telegramData.referral_code_used && !existing.referred_by) {
+      const { data: referrer } = await supabase.from('users').select('id, ip_address').eq('referral_code', telegramData.referral_code_used).maybeSingle();
+      if (referrer) {
+        const sameIp = telegramData.ip_address && referrer.ip_address && telegramData.ip_address === referrer.ip_address;
+        if (!sameIp) {
+          updates.referred_by = referrer.id;
+          const deadline = new Date(); deadline.setHours(deadline.getHours() + 48);
+          await supabase.from('referrals').insert({ referrer_id: referrer.id, referred_id: existing.id, status: 'pending', deadline_at: deadline.toISOString() });
+          await creditReferralHive(referrer.id, 250, 'New referral joined');
+          await createNotification(referrer.id, 'referral', 'New Referral!', `Someone joined using your referral link. +250 coins earned! Claim from Refer tab.`);
+          const { data: referrerUser } = await supabase.from('users').select('telegram_id, first_name').eq('id', referrer.id).maybeSingle();
+          if (referrerUser) {
+            await sendBotMessage(referrerUser.telegram_id, `🐝 <b>New Referral Joined!</b>\n\n${existing.first_name} joined using your referral link.\n\n💰 You earned <b>+250 coins</b>! (Claim from Refer tab)\n\nThey need to watch ads to unlock more rewards for you.`);
+          }
+        } else {
+          const deadline = new Date(); deadline.setHours(deadline.getHours() + 48);
+          await supabase.from('referrals').insert({ referrer_id: referrer.id, referred_id: existing.id, status: 'fake', fake_reason: 'Same IP address as referrer', deadline_at: deadline.toISOString() });
+          await supabase.from('fraud_logs').insert({ user_id: existing.id, type: 'referral_abuse', description: `Same-IP referral: returning user and referrer share IP ${telegramData.ip_address}`, ip_address: telegramData.ip_address, severity: 'high' });
+        }
+      }
+    }
+
     const { data } = await supabase.from('users').update(updates).eq('telegram_id', telegramData.telegram_id).select().maybeSingle();
     if (data && telegramData.ip_address && !data.is_admin) detectAndHandleIpAbuse(data.id, telegramData.ip_address);
     return data;
