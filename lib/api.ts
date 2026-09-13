@@ -1815,61 +1815,338 @@ export async function getUserActivity(userId: string) {
     { data: rewardCodeClaims },
     { data: websiteVisits },
   ] = await Promise.all([
-    supabase.from('users').select('*').eq('id', userId).maybeSingle(),
-    supabase.from('transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(50),
-    supabase.from('ad_watches').select('hive_earned', { count: 'exact' }).eq('user_id', userId).eq('completed', true),
-    supabase.from('withdrawals').select('*').eq('user_id', userId),
-    supabase.from('task_completions').select('hive_earned').eq('user_id', userId).eq('status', 'verified'),
-    supabase.from('referrals').select('*').eq('referrer_id', userId),
-    supabase.from('daily_bonus_claims').select('hive_earned').eq('user_id', userId),
-    supabase.from('reward_code_claims').select('hive_earned').eq('user_id', userId),
-    supabase.from('website_visits').select('hive_earned').eq('user_id', userId),
+    supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle(),
+
+    supabase
+      .from('transactions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1000),
+
+    supabase
+      .from('ad_watches')
+      .select('hive_earned', { count: 'exact' })
+      .eq('user_id', userId)
+      .eq('completed', true),
+
+    supabase
+      .from('withdrawals')
+      .select('*')
+      .eq('user_id', userId),
+
+    supabase
+      .from('task_completions')
+      .select('hive_earned')
+      .eq('user_id', userId)
+      .eq('status', 'verified'),
+
+    supabase
+      .from('referrals')
+      .select('*')
+      .eq('referrer_id', userId),
+
+    supabase
+      .from('daily_bonus_claims')
+      .select('hive_earned')
+      .eq('user_id', userId),
+
+    supabase
+      .from('reward_code_claims')
+      .select('hive_earned')
+      .eq('user_id', userId),
+
+    supabase
+      .from('website_visits')
+      .select('hive_earned')
+      .eq('user_id', userId),
   ]);
 
-  // Calculate earnings from all sources
-  const adEarnings = (adWatches ?? []).reduce((sum: number, w) => sum + (w.hive_earned || 0), 0);
-  const taskEarnings = (taskCompletions ?? []).reduce((sum: number, t) => sum + (t.hive_earned || 0), 0);
-  const dailyBonusEarnings = (dailyClaims ?? []).reduce((sum: number, d) => sum + (d.hive_earned || 0), 0);
-  const rewardCodeEarnings = (rewardCodeClaims ?? []).reduce((sum: number, r) => sum + (r.hive_earned || 0), 0);
-  const websiteVisitEarnings = (websiteVisits ?? []).reduce((sum: number, v) => sum + (v.hive_earned || 0), 0);
+  // ─────────────────────────────────────────────────────────────
+  // 1. Earnings from activity tables
+  // ─────────────────────────────────────────────────────────────
 
-  // Referral earnings (from unclaimed pool when claimed)
-  const referralEarnings = user?.unclaimed_referral_hive ?? 0;
+  const adEarnings = (adWatches ?? []).reduce(
+    (sum: number, w: any) => sum + (Number(w.hive_earned) || 0),
+    0
+  );
 
-  // Total earned from all methods
-  const totalCalculatedEarnings = adEarnings + taskEarnings + dailyBonusEarnings + rewardCodeEarnings + websiteVisitEarnings;
+  const taskEarnings = (taskCompletions ?? []).reduce(
+    (sum: number, t: any) => sum + (Number(t.hive_earned) || 0),
+    0
+  );
 
-  // Withdrawals
-  const totalWithdrawnHive = (withdrawals ?? []).filter(w => w.status === 'approved').reduce((sum, w) => sum + w.hive_amount, 0);
+  const dailyBonusEarnings = (dailyClaims ?? []).reduce(
+    (sum: number, d: any) => sum + (Number(d.hive_earned) || 0),
+    0
+  );
 
-  // Expected balance
-  const expectedBalance = totalCalculatedEarnings - totalWithdrawnHive;
-  const actualBalance = user?.hive_balance ?? 0;
+  const rewardCodeEarnings = (rewardCodeClaims ?? []).reduce(
+    (sum: number, r: any) => sum + (Number(r.hive_earned) || 0),
+    0
+  );
 
-  // Allow small tolerance for rounding
-  const balanceMismatch = Math.abs(expectedBalance - actualBalance) > 2;
+  const websiteVisitEarnings = (websiteVisits ?? []).reduce(
+    (sum: number, v: any) => sum + (Number(v.hive_earned) || 0),
+    0
+  );
+
+  // ─────────────────────────────────────────────────────────────
+  // 2. Earnings recorded in transactions
+  //
+  // Mining, game and claimed referral rewards are credited
+  // directly through the transaction system.
+  // ─────────────────────────────────────────────────────────────
+
+  const transactionRows = transactions ?? [];
+
+  const miningEarnings = transactionRows
+    .filter((t: any) => t.type === 'mining' && Number(t.amount) > 0)
+    .reduce(
+      (sum: number, t: any) => sum + (Number(t.amount) || 0),
+      0
+    );
+
+  const gameEarnings = transactionRows
+    .filter((t: any) => t.type === 'game' && Number(t.amount) > 0)
+    .reduce(
+      (sum: number, t: any) => sum + (Number(t.amount) || 0),
+      0
+    );
+
+  const referralTransactionEarnings = transactionRows
+    .filter((t: any) => t.type === 'referral' && Number(t.amount) > 0)
+    .reduce(
+      (sum: number, t: any) => sum + (Number(t.amount) || 0),
+      0
+    );
+
+  // Referral rewards still waiting in the unclaimed pool.
+  // This is NOT part of hive_balance yet.
+  const unclaimedReferralHive = Number(
+    user?.unclaimed_referral_hive ?? 0
+  ) || 0;
+
+  // ─────────────────────────────────────────────────────────────
+  // 3. Total earned
+  // ─────────────────────────────────────────────────────────────
+
+  const totalCalculatedEarnings =
+    adEarnings +
+    taskEarnings +
+    dailyBonusEarnings +
+    rewardCodeEarnings +
+    websiteVisitEarnings +
+    miningEarnings +
+    gameEarnings +
+    referralTransactionEarnings;
+
+  // ─────────────────────────────────────────────────────────────
+  // 4. Approved withdrawals
+  // ─────────────────────────────────────────────────────────────
+
+  const approvedWithdrawals = (withdrawals ?? []).filter(
+    (w: any) => w.status === 'approved'
+  );
+
+  const totalWithdrawnHive = approvedWithdrawals.reduce(
+    (sum: number, w: any) => sum + (Number(w.hive_amount) || 0),
+    0
+  );
+
+  const totalWithdrawnUsdt = approvedWithdrawals.reduce(
+    (sum: number, w: any) => sum + (Number(w.net_amount) || 0),
+    0
+  );
+
+  // ─────────────────────────────────────────────────────────────
+  // 5. Expected main balance
+  //
+  // IMPORTANT:
+  // Unclaimed referral rewards are excluded because they are
+  // still outside hive_balance.
+  // ─────────────────────────────────────────────────────────────
+
+  const expectedBalance =
+    totalCalculatedEarnings - totalWithdrawnHive;
+
+  const actualBalance =
+    Number(user?.hive_balance ?? 0) || 0;
+
+  const balanceDifference =
+    actualBalance - expectedBalance;
+
+  // Small tolerance for floating-point / rounding differences.
+  const balanceMismatch =
+    Math.abs(balanceDifference) > 2;
+
+  // ─────────────────────────────────────────────────────────────
+  // 6. Determine audit severity
+  //
+  // Mismatch itself does NOT automatically ban the user.
+  // It becomes evidence for further security checks.
+  // ─────────────────────────────────────────────────────────────
+
+  let auditSeverity:
+    | 'informational'
+    | 'warning'
+    | 'high'
+    | 'critical' = 'informational';
+
+  if (balanceMismatch) {
+    const absDifference = Math.abs(balanceDifference);
+
+    if (absDifference > 1000) {
+      auditSeverity = 'critical';
+    } else if (absDifference > 100) {
+      auditSeverity = 'high';
+    } else if (absDifference > 10) {
+      auditSeverity = 'warning';
+    } else {
+      auditSeverity = 'warning';
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 7. Create audit evidence
+  //
+  // IMPORTANT:
+  // This does NOT ban the user.
+  // It only stores the mismatch evidence.
+  // ─────────────────────────────────────────────────────────────
+
+  if (balanceMismatch) {
+    try {
+      await supabase.from('balance_audit_logs').insert({
+        user_id: userId,
+
+        actual_balance: actualBalance,
+        expected_balance: expectedBalance,
+        balance_difference: balanceDifference,
+
+        severity: auditSeverity,
+
+        status: 'open',
+
+        evidence: {
+          source: 'admin_user_activity_audit',
+
+          earnings: {
+            ads: adEarnings,
+            tasks: taskEarnings,
+            daily_bonus: dailyBonusEarnings,
+            reward_codes: rewardCodeEarnings,
+            website_visits: websiteVisitEarnings,
+            mining: miningEarnings,
+            game: gameEarnings,
+            referral_claimed: referralTransactionEarnings,
+            referral_unclaimed: unclaimedReferralHive,
+          },
+
+          totals: {
+            calculated_earnings: totalCalculatedEarnings,
+            approved_withdrawals: totalWithdrawnHive,
+            expected_balance: expectedBalance,
+            actual_balance: actualBalance,
+            difference: balanceDifference,
+          },
+
+          activity_counts: {
+            ads: adWatches?.length ?? 0,
+            tasks: taskCompletions?.length ?? 0,
+            daily_bonus: dailyClaims?.length ?? 0,
+            reward_codes: rewardCodeClaims?.length ?? 0,
+            website_visits: websiteVisits?.length ?? 0,
+            referrals: referrals?.length ?? 0,
+            completed_referrals:
+              (referrals ?? []).filter(
+                (r: any) => r.status === 'completed'
+              ).length,
+            mining_transactions: transactionRows.filter(
+              (t: any) =>
+                t.type === 'mining' &&
+                Number(t.amount) > 0
+            ).length,
+            game_transactions: transactionRows.filter(
+              (t: any) =>
+                t.type === 'game' &&
+                Number(t.amount) > 0
+            ).length,
+            referral_transactions: transactionRows.filter(
+              (t: any) =>
+                t.type === 'referral' &&
+                Number(t.amount) > 0
+            ).length,
+          },
+
+          note:
+            'Balance mismatch detected. This record is audit evidence only and does not automatically ban the account.',
+        },
+      });
+    } catch (auditError) {
+      console.error(
+        'Failed to create balance audit log:',
+        auditError
+      );
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 8. Return admin activity data
+  // ─────────────────────────────────────────────────────────────
 
   return {
     user,
-    transactions: transactions ?? [],
+
+    transactions: transactionRows,
+
     totalAds: adWatches?.length ?? 0,
-    totalWithdrawals: (withdrawals ?? []).length,
-    totalWithdrawnUsdt: (withdrawals ?? []).filter(w => w.status === 'approved').reduce((sum, w) => sum + w.net_amount, 0),
-    totalTasksCompleted: (taskCompletions ?? []).length,
-    totalReferrals: (referrals ?? []).length,
-    completedReferrals: (referrals ?? []).filter(r => r.status === 'completed').length,
-    // Breakdown
+
+    totalWithdrawals: withdrawals?.length ?? 0,
+
+    totalWithdrawnUsdt,
+
+    totalTasksCompleted:
+      taskCompletions?.length ?? 0,
+
+    totalReferrals:
+      referrals?.length ?? 0,
+
+    completedReferrals:
+      (referrals ?? []).filter(
+        (r: any) => r.status === 'completed'
+      ).length,
+
+    // Earnings breakdown
     adEarnings,
     taskEarnings,
     dailyBonusEarnings,
     rewardCodeEarnings,
     websiteVisitEarnings,
-    referralEarnings,
+
+    miningEarnings,
+    gameEarnings,
+    referralEarnings: referralTransactionEarnings,
+
+    unclaimedReferralHive,
+
     totalCalculatedEarnings,
+
     totalWithdrawnHive,
+
     expectedBalance,
+
     actualBalance,
+
+    balanceDifference,
+
     balanceMismatch,
+
+    auditSeverity,
   };
 }
 
