@@ -2150,16 +2150,142 @@ export async function getUserActivity(userId: string) {
   };
 }
 
-// Auto-audit user: suspend if balance doesn't match activity
-export async function autoAuditUser(adminId: string, userId: string): Promise<{ suspicious: boolean; reason: string }> {
-  const activity = await getUserActivity(userId);
-  if (activity.balanceMismatch && activity.actualBalance > activity.expectedBalance + 10) {
-    const reason = `Balance mismatch: expected ${activity.expectedBalance.toFixed(2)}H, actual ${activity.actualBalance.toFixed(2)}H`;
-    await suspendUser(adminId, userId, reason);
-    await supabase.from('fraud_logs').insert({ user_id: userId, type: 'balance_manipulation', description: reason, severity: 'critical' });
-    return { suspicious: true, reason };
+// ─── Automatic Balance Fraud Audit ───────────────────────────────────────────
+
+export async function autoAuditUser(
+  adminId: string,
+  userId: string
+): Promise<{ suspicious: boolean; reason: string }> {
+  try {
+    const activity = await getUserActivity(userId);
+
+    // No suspicious balance difference
+    if (
+      !activity.balanceMismatch ||
+      activity.actualBalance <= activity.expectedBalance + 10
+    ) {
+      return {
+        suspicious: false,
+        reason: '',
+      };
+    }
+
+    const difference =
+      activity.actualBalance - activity.expectedBalance;
+
+    const reason =
+      `Balance manipulation detected. ` +
+      `Expected: ${activity.expectedBalance.toFixed(2)} H, ` +
+      `Actual: ${activity.actualBalance.toFixed(2)} H, ` +
+      `Difference: ${difference.toFixed(2)} H`;
+
+    // Check target account before taking action
+    const { data: targetUser, error: targetError } = await supabase
+      .from('users')
+      .select(
+        'id, telegram_id, first_name, username, is_admin, permanent_ban, security_lock'
+      )
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (targetError || !targetUser) {
+      throw new Error('Target user not found');
+    }
+
+    // Already permanently banned
+    if (targetUser.permanent_ban === true) {
+      return {
+        suspicious: true,
+        reason: 'Account is already permanently banned.',
+      };
+    }
+
+    // Never automatically ban an admin account
+    // This is an additional application-level safety check.
+    if (targetUser.is_admin === true) {
+      console.warn(
+        `Balance audit detected on admin account ${userId}. No automatic ban applied.`
+      );
+
+      await supabase.from('fraud_logs').insert({
+        user_id: userId,
+        type: 'balance_manipulation',
+        description:
+          `Balance mismatch detected on admin account. ${reason}`,
+        severity: 'critical',
+      });
+
+      return {
+        suspicious: true,
+        reason:
+          'Critical balance mismatch detected on an admin account. Automatic ban was blocked.',
+      };
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // PERMANENT FRAUD BAN
+    // The database RPC applies:
+    // is_suspended = true
+    // permanent_ban = true
+    // security_lock = true
+    // manually_unsuspended = false
+    // ─────────────────────────────────────────────────────────────
+
+    const { data: banned, error: banError } =
+      await supabase.rpc('permanent_ban_user', {
+        p_user_id: userId,
+        p_reason: reason,
+      });
+
+    if (banError || banned !== true) {
+      console.error(
+        'Automatic permanent fraud ban failed:',
+        banError
+      );
+
+      await supabase.from('fraud_logs').insert({
+        user_id: userId,
+        type: 'balance_manipulation',
+        description:
+          `CRITICAL: Balance manipulation detected but permanent ban failed. ${reason}`,
+        severity: 'critical',
+      });
+
+      return {
+        suspicious: true,
+        reason:
+          'Fraud detected, but permanent ban could not be applied.',
+      };
+    }
+
+    // Additional fraud log
+    await supabase.from('fraud_logs').insert({
+      user_id: userId,
+      type: 'balance_manipulation',
+      description:
+        `PERMANENT BAN: ${reason}`,
+      severity: 'critical',
+    });
+
+    console.log(
+      `Permanent fraud ban applied to ${userId}: ${reason}`
+    );
+
+    return {
+      suspicious: true,
+      reason,
+    };
+  } catch (error) {
+    console.error(
+      'Automatic balance audit failed:',
+      error
+    );
+
+    return {
+      suspicious: false,
+      reason: '',
+    };
   }
-  return { suspicious: false, reason: '' };
 }
 
 export async function approveWithdrawal(adminId: string, withdrawalId: string, txid: string): Promise<void> {
