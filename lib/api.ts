@@ -720,30 +720,125 @@ export async function claimDailyBonus(userId: string): Promise<{ success: boolea
 
 // ─── Reward Codes ─────────────────────────────────────────────────────────────
 
-export async function claimRewardCode(userId: string, code: string): Promise<{ success: boolean; hive: number; message: string }> {
-  const guard = await checkNotSuspended(userId);
-  if (!guard.ok) return { success: false, hive: 0, message: guard.message };
+export async function claimRewardCode(
+  userId: string,
+  code: string
+): Promise<{
+  success: boolean;
+  hive: number;
+  message: string;
+}> {
+  try {
+    if (!userId) {
+      return {
+        success: false,
+        hive: 0,
+        message: 'Unable to verify account.'
+      };
+    }
 
-  const { data: rc } = await supabase.from('reward_codes').select('*').eq('code', code.toUpperCase()).maybeSingle();
-  if (!rc) return { success: false, hive: 0, message: 'Invalid reward code' };
-  if (!rc.is_active) return { success: false, hive: 0, message: 'This code is no longer active' };
-  if (rc.expires_at && new Date(rc.expires_at) < new Date()) return { success: false, hive: 0, message: 'Code has expired' };
-  if (rc.usage_limit !== null && rc.usage_count >= rc.usage_limit) return { success: false, hive: 0, message: 'Code usage limit reached' };
+    const cleanCode = code.trim().toUpperCase();
 
-  const { data: existing } = await supabase.from('reward_code_claims').select('id').eq('user_id', userId).eq('reward_code_id', rc.id).maybeSingle();
-  if (existing) return { success: false, hive: 0, message: 'You already claimed this code' };
+    if (!cleanCode) {
+      return {
+        success: false,
+        hive: 0,
+        message: 'Please enter a reward code.'
+      };
+    }
 
-  await supabase.from('reward_code_claims').insert({ user_id: userId, reward_code_id: rc.id, hive_earned: rc.reward_amount });
-  await supabase.from('reward_codes').update({ usage_count: rc.usage_count + 1 }).eq('id', rc.id);
-  await creditHive(userId, rc.reward_amount, 'reward_code', `⚡ Reward code: ${code.toUpperCase()}`);
-  await createNotification(userId, 'reward_code', '⚡ Reward Code Claimed!', `You earned ${rc.reward_amount} 🍯 Hive!`);
+    const { data, error } = await supabase.rpc('claim_reward_code', {
+      p_user_id: userId,
+      p_code: cleanCode
+    });
 
-  const { data: user } = await supabase.from('users').select('telegram_id').eq('id', userId).maybeSingle();
-  if (user) {
-    await sendBotMessage(user.telegram_id, `⚡ <b>Reward Code Claimed!</b>\n\nCode: <code>${code.toUpperCase()}</code>\n+${rc.reward_amount} 🍯 <b>Hive</b> added to your balance!`);
+    if (error) {
+      console.error('Reward code claim RPC error:', error);
+
+      return {
+        success: false,
+        hive: 0,
+        message: 'Unable to process reward code. Please try again.'
+      };
+    }
+
+    const result = data as {
+      success?: boolean;
+      hive?: number;
+      message?: string;
+    } | null;
+
+    if (!result || result.success !== true) {
+      return {
+        success: false,
+        hive: 0,
+        message: result?.message ?? 'Unable to claim reward code.'
+      };
+    }
+
+    const reward = Number(result.hive ?? 0);
+
+    if (!Number.isFinite(reward) || reward <= 0) {
+      return {
+        success: false,
+        hive: 0,
+        message: 'Invalid reward amount.'
+      };
+    }
+
+    // Notification is intentionally kept outside the balance transaction.
+    // If notification fails, the reward itself remains safely claimed.
+    try {
+      await createNotification(
+        userId,
+        'reward_code',
+        '⚡ Reward Code Claimed!',
+        `You earned ${reward} 🍯 Hive!`
+      );
+    } catch (notificationError) {
+      console.error(
+        'Reward code notification failed:',
+        notificationError
+      );
+    }
+
+    try {
+      const { data: user } = await supabase
+        .from('users')
+        .select('telegram_id')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (user?.telegram_id) {
+        await sendBotMessage(
+          user.telegram_id,
+          `⚡ <b>Reward Code Claimed!</b>\n\n` +
+          `Code: <code>${cleanCode}</code>\n` +
+          `+${reward} 🍯 <b>Hive</b> added to your balance!`
+        );
+      }
+    } catch (botError) {
+      console.error(
+        'Reward code Telegram notification failed:',
+        botError
+      );
+    }
+
+    return {
+      success: true,
+      hive: reward,
+      message: result.message ?? `+${reward} Hive earned!`
+    };
+
+  } catch (error) {
+    console.error('Reward code claim failed:', error);
+
+    return {
+      success: false,
+      hive: 0,
+      message: 'Unable to process reward code. Please try again.'
+    };
   }
-
-  return { success: true, hive: rc.reward_amount, message: `+${rc.reward_amount} Hive earned!` };
 }
 
 // ─── Ads ─────────────────────────────────────────────────────────────────────
