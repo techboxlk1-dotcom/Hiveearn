@@ -544,13 +544,17 @@ export async function claimReferralRewards(
     };
   }
 
-  const { data: user } = await supabase
+  const { data: user, error: userError } = await supabase
     .from('users')
-    .select('unclaimed_referral_hive, permanent_ban, security_lock')
+    .select(`
+      unclaimed_referral_hive,
+      permanent_ban,
+      security_lock
+    `)
     .eq('id', userId)
     .maybeSingle();
 
-  if (!user) {
+  if (userError || !user) {
     return {
       success: false,
       hive: 0,
@@ -566,7 +570,7 @@ export async function claimReferralRewards(
     };
   }
 
-  const pending = Number(user.unclaimed_referral_hive || 0);
+  const pending = Number(user.unclaimed_referral_hive ?? 0);
 
   if (!Number.isFinite(pending) || pending <= 0) {
     return {
@@ -581,17 +585,21 @@ export async function claimReferralRewards(
   if (!Number.isFinite(amount) || amount <= 0) {
     await autoSuspendUser(
       userId,
-      'Invalid referral reward detected'
+      'Invalid referral reward amount detected'
     );
 
     return {
       success: false,
       hive: 0,
-      message: 'Security violation detected'
+      message: '🚫 Security violation detected.'
     };
   }
 
   try {
+    /*
+     * Credit the verified server-side amount.
+     * The client never decides the reward amount.
+     */
     await creditHive(
       userId,
       amount,
@@ -599,31 +607,37 @@ export async function claimReferralRewards(
       'Referral rewards claimed'
     );
 
-    const { error } = await supabase
+    /*
+     * Clear the unclaimed pool only after the balance
+     * credit succeeds.
+     */
+    const { error: clearError } = await supabase
       .from('users')
       .update({
         unclaimed_referral_hive: 0,
         updated_at: new Date().toISOString()
       })
-      .eq('id', userId);
+      .eq('id', userId)
+      .eq('permanent_ban', false)
+      .eq('security_lock', false);
 
-    if (error) {
+    if (clearError) {
       await autoSuspendUser(
         userId,
-        'Referral reward claim state update failed'
+        'Referral reward state integrity violation'
       );
 
       return {
         success: false,
         hive: 0,
-        message: 'Security error while claiming rewards'
+        message: '🚫 Security error while claiming rewards.'
       };
     }
 
     await createNotification(
       userId,
       'referral',
-      'Referral Rewards Claimed!',
+      '🍯 Referral Rewards Claimed!',
       `You claimed ${amount} coins from referral rewards!`
     );
 
@@ -641,12 +655,6 @@ export async function claimReferralRewards(
       message: 'Unable to claim referral rewards'
     };
   }
-}
-  const amount = Math.floor(user.unclaimed_referral_hive * 100) / 100;
-  await supabase.from('users').update({ hive_balance: user.hive_balance + amount, unclaimed_referral_hive: 0 }).eq('id', userId);
-  await supabase.from('transactions').insert({ user_id: userId, type: 'referral', amount, description: 'Referral rewards claimed', status: 'completed' });
-  await createNotification(userId, 'referral', 'Referral Rewards Claimed!', `You claimed ${amount} coins from referral rewards!`);
-  return { success: true, hive: amount, message: `+${amount} coins claimed!` };
 }
 
 // ─── Daily Bonus ─────────────────────────────────────────────────────────────
