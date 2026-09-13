@@ -2423,28 +2423,90 @@ export async function getGameStatus(userId: string): Promise<{ canPlay: boolean;
   return { canPlay: hoursLeft === 0, hoursLeft, lastPlayedAt: lastGame.created_at, totalGames: count ?? 0 };
 }
 
-export async function recordGameReward(userId: string, score: number, hiveEarned: number): Promise<{ success: boolean; message: string }> {
+export async function recordGameReward(
+  userId: string,
+  score: number,
+  hiveEarned: number
+): Promise<{ success: boolean; message: string }> {
   const guard = await checkNotSuspended(userId);
-  if (!guard.ok) return { success: false, message: guard.message };
 
-  // Check 2h cooldown
+  if (!guard.ok) {
+    return {
+      success: false,
+      message: guard.message
+    };
+  }
+
+  if (!Number.isFinite(score) || score < 0) {
+    await autoSuspendUser(
+      userId,
+      `Invalid game score detected: ${String(score)}`
+    );
+
+    return {
+      success: false,
+      message: '🚫 Invalid game activity detected.'
+    };
+  }
+
+  // The reward is generated SERVER-SIDE.
+  // Never trust the reward supplied by the client.
+  const clientReward = Number(hiveEarned);
+
   const status = await getGameStatus(userId);
-  if (!status.canPlay) return { success: false, message: `Come back in ${status.hoursLeft}h to play again` };
 
-  // Random reward between 5-20 Hive
-  const reward = Math.floor(Math.random() * 16) + 5; // 5-20 inclusive
+  if (!status.canPlay) {
+    return {
+      success: false,
+      message: `Come back in ${status.hoursLeft}h to play again`
+    };
+  }
 
-  await supabase.from('transactions').insert({
-    user_id: userId,
-    type: 'game',
-    amount: reward,
-    description: `🎮 Mini Game — Score: ${score}`,
-    status: 'completed',
-  });
-  await creditHive(userId, reward, 'game', `🎮 Mini Game reward (Score: ${score})`);
-  await createNotification(userId, 'reward', '🎮 Game Reward!', `You earned ${reward} 🍯 Hive from the mini game!`);
+  const reward =
+    Math.floor(Math.random() * 16) + 5;
 
-  return { success: true, message: `+${reward} Hive earned!` };
+  if (
+    !Number.isFinite(clientReward) ||
+    clientReward !== reward
+  ) {
+    await autoSuspendUser(
+      userId,
+      `Game reward manipulation detected. Submitted: ${clientReward}, server calculated: ${reward}`
+    );
+
+    return {
+      success: false,
+      message: '🚫 Reward manipulation detected. Account permanently banned.'
+    };
+  }
+
+  try {
+    await creditHive(
+      userId,
+      reward,
+      'game',
+      `🎮 Mini Game reward (Score: ${score})`
+    );
+  } catch (error) {
+    console.error('Game reward error:', error);
+
+    return {
+      success: false,
+      message: 'Unable to credit game reward'
+    };
+  }
+
+  await createNotification(
+    userId,
+    'reward',
+    '🎮 Game Reward!',
+    `You earned ${reward} 🍯 Hive from the mini game!`
+  );
+
+  return {
+    success: true,
+    message: `+${reward} Hive earned!`
+  };
 }
 
 export async function getGameHighScore(userId: string): Promise<number> {
