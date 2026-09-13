@@ -1681,11 +1681,71 @@ export async function suspendUser(adminId: string, userId: string, reason: strin
   if (user) await sendBotMessage(user.telegram_id, `🚫 <b>Account Suspended</b>\n\nYour Hive Earn account has been suspended.\n\n<b>Reason:</b> ${reason}\n\nContact the admin if you believe this is a mistake.`, false);
 }
 
-export async function unsuspendUser(adminId: string, userId: string): Promise<void> {
-  await supabase.from('users').update({ is_suspended: false, suspension_reason: null, manually_unsuspended: true }).eq('id', userId);
-  await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'unsuspend_user', target_type: 'user', target_id: userId });
-  const { data: user } = await supabase.from('users').select('telegram_id').eq('id', userId).maybeSingle();
-  if (user) await sendBotMessage(user.telegram_id, `✅ <b>Account Unsuspended</b>\n\nYour Hive Earn account has been restored. You can now earn Hive again!`);
+export async function unsuspendUser(
+  adminId: string,
+  userId: string
+): Promise<void> {
+  const { data: user } = await supabase
+    .from('users')
+    .select(`
+      telegram_id,
+      permanent_ban,
+      permanent_ban_reason
+    `)
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Permanent ban can NEVER be removed
+  if (user.permanent_ban) {
+    await supabase.from('admin_logs').insert({
+      admin_id: adminId,
+      action: 'blocked_permanent_unban_attempt',
+      target_type: 'user',
+      target_id: userId,
+      new_data: {
+        reason:
+          user.permanent_ban_reason ??
+          'Permanent fraud ban'
+      }
+    });
+
+    throw new Error(
+      'PERMANENT_BAN_CANNOT_BE_REMOVED'
+    );
+  }
+
+  const { error } = await supabase
+    .from('users')
+    .update({
+      is_suspended: false,
+      suspension_reason: null,
+      manually_unsuspended: true,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', userId)
+    .eq('permanent_ban', false);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await supabase.from('admin_logs').insert({
+    admin_id: adminId,
+    action: 'unsuspend_user',
+    target_type: 'user',
+    target_id: userId
+  });
+
+  await sendBotMessage(
+    user.telegram_id,
+    `✅ <b>Account Unsuspended</b>\n\n` +
+    `Your Hive Earn account has been restored. ` +
+    `You can now earn Hive again!`
+  );
 }
 
 export async function listUser(adminId: string, userId: string, reason: string): Promise<void> {
