@@ -130,7 +130,7 @@ export async function detectAndHandleIpAbuse(userId: string, ipAddress: string):
 }
 
 async function autoSuspendUser(userId: string, reason: string): Promise<void> {
-  const { data: user } = await supabase
+  const { data: user, error: userError } = await supabase
     .from('users')
     .select(`
       id,
@@ -145,64 +145,94 @@ async function autoSuspendUser(userId: string, reason: string): Promise<void> {
     .eq('id', userId)
     .maybeSingle();
 
-  if (!user || user.is_admin) return;
+  if (userError) {
+    console.error('Failed to load user for security action:', userError);
+    return;
+  }
 
-  // Already permanently banned — never modify/unban it
-  if (user.permanent_ban) return;
+  if (!user) {
+    console.error('User not found for security action:', userId);
+    return;
+  }
+
+  // Already permanently banned
+  if (user.permanent_ban) {
+    return;
+  }
 
   const banReason = `Fraud / Security violation: ${reason}`;
+  const now = new Date().toISOString();
 
-  const { error } = await supabase
+  const { error: banError } = await supabase
     .from('users')
     .update({
       permanent_ban: true,
       permanent_ban_reason: banReason,
-      permanently_banned_at: new Date().toISOString(),
+      permanently_banned_at: now,
       security_lock: true,
       is_suspended: true,
       suspension_reason: banReason,
-      updated_at: new Date().toISOString(),
+      updated_at: now,
     })
     .eq('id', userId);
 
-  if (error) {
-    console.error('Permanent ban failed:', error);
+  if (banError) {
+    console.error('Permanent ban failed:', banError);
     return;
   }
 
-  await createNotification(
-    userId,
-    'suspended',
-    '🚫 Permanent Ban',
-    `Your Hive Earn account has been permanently banned.\n\nReason: ${banReason}`
-  );
+  // Security notification
+  try {
+    await createNotification(
+      userId,
+      'security',
+      'Account Permanently Banned',
+      'Your account has been permanently banned بسبب a security/fraud violation.'
+    );
+  } catch (error) {
+    console.error('Failed to create ban notification:', error);
+  }
 
-  await sendBotMessage(
-    user.telegram_id,
-    `🚫 <b>PERMANENT ACCOUNT BAN</b>\n\n` +
-    `Your Hive Earn account has been permanently banned.\n\n` +
-    `<b>Reason:</b> ${banReason}\n\n` +
-    `This ban cannot be removed.`,
-    false
-  );
+  // Telegram notification
+  try {
+    await sendBotMessage(
+      user.telegram_id,
+      `🚨 ACCOUNT PERMANENTLY BANNED\n\n` +
+      `👤 User: ${user.first_name || 'Unknown'}\n` +
+      `🆔 Telegram ID: ${user.telegram_id}\n\n` +
+      `⚠️ Reason:\n${banReason}\n\n` +
+      `🔒 This ban is permanent.`
+    );
+  } catch (error) {
+    console.error('Failed to send Telegram ban notification:', error);
+  }
 
-  await supabase.from('fraud_logs').insert({
-    user_id: userId,
-    type: 'other',
-    description: `Permanent fraud ban: ${banReason}`,
-    ip_address: user.ip_address ?? null,
-    severity: 'critical'
-  });
+  // Fraud log
+  try {
+    await supabase.from('fraud_logs').insert({
+      user_id: userId,
+      type: 'other',
+      description: `Permanent fraud ban: ${banReason}`,
+      ip_address: user.ip_address ?? null,
+      severity: 'critical',
+    });
+  } catch (error) {
+    console.error('Failed to create fraud log:', error);
+  }
 
-  await notifyAdmin(
-    `🚨 <b>PERMANENT FRAUD BAN</b>\n\n` +
-    `User: ${user.first_name}${user.username ? ` (@${user.username})` : ''}\n` +
-    `Telegram ID: <code>${user.telegram_id}</code>` +
-    `${user.ip_address ? `\nIP: <code>${user.ip_address}</code>` : ''}\n\n` +
-    `<b>Reason:</b> ${banReason}\n\n` +
-    `🔒 <b>Permanent ban applied.</b>`
-  );
-        }
+  // Notify admin
+  try {
+    await notifyAdmin(
+      `🚨 PERMANENT FRAUD BAN\n\n` +
+      `👤 User: ${user.first_name || 'Unknown'}\n` +
+      `🆔 Telegram ID: ${user.telegram_id}\n` +
+      `🔒 Permanent ban: YES\n\n` +
+      `⚠️ Reason:\n${banReason}`
+    );
+  } catch (error) {
+    console.error('Failed to notify admin:', error);
+  }
+}
 
 export async function isIpBlockedForReferral(ipAddress: string): Promise<boolean> {
   if (!ipAddress || ipAddress === 'unknown') return false;
