@@ -130,13 +130,79 @@ export async function detectAndHandleIpAbuse(userId: string, ipAddress: string):
 }
 
 async function autoSuspendUser(userId: string, reason: string): Promise<void> {
-  const { data: user } = await supabase.from('users').select('is_admin, is_suspended, telegram_id, first_name, username, ip_address').eq('id', userId).maybeSingle();
-  if (!user || user.is_admin || user.is_suspended) return;
-  await supabase.from('users').update({ is_suspended: true, suspension_reason: reason }).eq('id', userId);
-  await createNotification(userId, 'suspended', 'Account Suspended', `Your account has been automatically suspended. Reason: ${reason}`);
-  await sendBotMessage(user.telegram_id, `🚫 <b>Account Suspended</b>\n\nYour Hive Earn account has been suspended.\n\n<b>Reason:</b> ${reason}\n\nIf you believe this is a mistake, contact support: @hiveearn`, false);
-  await notifyAdmin(`🚫 <b>User Auto-Suspended</b>\n\nUser: ${user.first_name}${user.username ? ` (@${user.username})` : ''}\nTelegram ID: <code>${user.telegram_id}</code>${user.ip_address ? `\nIP: <code>${user.ip_address}</code>` : ''}\n\n<b>Reason:</b> ${reason}`);
-}
+  const { data: user } = await supabase
+    .from('users')
+    .select(`
+      id,
+      is_admin,
+      is_suspended,
+      permanent_ban,
+      telegram_id,
+      first_name,
+      username,
+      ip_address
+    `)
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (!user || user.is_admin) return;
+
+  // Already permanently banned — never modify/unban it
+  if (user.permanent_ban) return;
+
+  const banReason = `Fraud / Security violation: ${reason}`;
+
+  const { error } = await supabase
+    .from('users')
+    .update({
+      permanent_ban: true,
+      permanent_ban_reason: banReason,
+      permanently_banned_at: new Date().toISOString(),
+      security_lock: true,
+      is_suspended: true,
+      suspension_reason: banReason,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId);
+
+  if (error) {
+    console.error('Permanent ban failed:', error);
+    return;
+  }
+
+  await createNotification(
+    userId,
+    'suspended',
+    '🚫 Permanent Ban',
+    `Your Hive Earn account has been permanently banned.\n\nReason: ${banReason}`
+  );
+
+  await sendBotMessage(
+    user.telegram_id,
+    `🚫 <b>PERMANENT ACCOUNT BAN</b>\n\n` +
+    `Your Hive Earn account has been permanently banned.\n\n` +
+    `<b>Reason:</b> ${banReason}\n\n` +
+    `This ban cannot be removed.`,
+    false
+  );
+
+  await supabase.from('fraud_logs').insert({
+    user_id: userId,
+    type: 'other',
+    description: `Permanent fraud ban: ${banReason}`,
+    ip_address: user.ip_address ?? null,
+    severity: 'critical'
+  });
+
+  await notifyAdmin(
+    `🚨 <b>PERMANENT FRAUD BAN</b>\n\n` +
+    `User: ${user.first_name}${user.username ? ` (@${user.username})` : ''}\n` +
+    `Telegram ID: <code>${user.telegram_id}</code>` +
+    `${user.ip_address ? `\nIP: <code>${user.ip_address}</code>` : ''}\n\n` +
+    `<b>Reason:</b> ${banReason}\n\n` +
+    `🔒 <b>Permanent ban applied.</b>`
+  );
+        }
 
 export async function isIpBlockedForReferral(ipAddress: string): Promise<boolean> {
   if (!ipAddress || ipAddress === 'unknown') return false;
