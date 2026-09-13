@@ -220,9 +220,50 @@ export async function blockIp(adminId: string, ipAddress: string, reason: string
 // ─── Suspension Guard ─────────────────────────────────────────────────────────
 
 async function checkNotSuspended(userId: string): Promise<{ ok: boolean; message: string }> {
-  const { data } = await supabase.from('users').select('is_suspended, suspension_reason').eq('id', userId).maybeSingle();
-  if (data?.is_suspended) return { ok: false, message: `Your account is suspended. Reason: ${data.suspension_reason ?? 'Policy violation'}` };
-  return { ok: true, message: '' };
+  const { data, error } = await supabase
+    .from('users')
+    .select(`
+      is_suspended,
+      suspension_reason,
+      permanent_ban,
+      permanent_ban_reason,
+      security_lock
+    `)
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return {
+      ok: false,
+      message: 'Unable to verify account security.'
+    };
+  }
+
+  if (data.permanent_ban) {
+    return {
+      ok: false,
+      message: `🚫 Your account is permanently banned. Reason: ${data.permanent_ban_reason ?? 'Security violation'}`
+    };
+  }
+
+  if (data.security_lock) {
+    return {
+      ok: false,
+      message: '🔒 Your account is security locked.'
+    };
+  }
+
+  if (data.is_suspended) {
+    return {
+      ok: false,
+      message: `Your account is suspended. Reason: ${data.suspension_reason ?? 'Policy violation'}`
+    };
+  }
+
+  return {
+    ok: true,
+    message: ''
+  };
 }
 
 // ─── User ────────────────────────────────────────────────────────────────────
@@ -338,18 +379,147 @@ export async function getUserByTelegramId(telegramId: number): Promise<User | nu
 
 // ─── Balance ─────────────────────────────────────────────────────────────────
 
-export async function creditHive(userId: string, amount: number, type: Transaction['type'], description: string, referenceId?: string): Promise<void> {
-  const { data: user } = await supabase.from('users').select('hive_balance, total_earned').eq('id', userId).maybeSingle();
-  if (!user) return;
-  await supabase.from('users').update({ hive_balance: user.hive_balance + amount, total_earned: (user.total_earned || 0) + amount }).eq('id', userId);
-  await supabase.from('transactions').insert({ user_id: userId, type, amount, description, reference_id: referenceId ?? null, status: 'completed' });
+export async function creditHive(
+  userId: string,
+  amount: number,
+  type: Transaction['type'],
+  description: string,
+  referenceId?: string
+): Promise<void> {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    await autoSuspendUser(
+      userId,
+      `Invalid reward amount detected: ${String(amount)}`
+    );
+    return;
+  }
+
+  const guard = await checkNotSuspended(userId);
+
+  if (!guard.ok) {
+    throw new Error(guard.message);
+  }
+
+  const { data: user } = await supabase
+    .from('users')
+    .select('hive_balance, total_earned, permanent_ban, security_lock')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  if (user.permanent_ban || user.security_lock) {
+    throw new Error('Account security locked');
+  }
+
+  const newBalance = Number(user.hive_balance || 0) + amount;
+  const newTotalEarned = Number(user.total_earned || 0) + amount;
+
+  if (!Number.isFinite(newBalance) || !Number.isFinite(newTotalEarned)) {
+    await autoSuspendUser(
+      userId,
+      'Invalid balance calculation detected'
+    );
+    throw new Error('Invalid balance calculation');
+  }
+
+  const { error: updateError } = await supabase
+    .from('users')
+    .update({
+      hive_balance: newBalance,
+      total_earned: newTotalEarned,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', userId);
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  const { error: transactionError } = await supabase
+    .from('transactions')
+    .insert({
+      user_id: userId,
+      type,
+      amount,
+      description,
+      reference_id: referenceId ?? null,
+      status: 'completed'
+    });
+
+  if (transactionError) {
+    console.error('Transaction insert failed:', transactionError);
+  }
 }
 
-export async function debitHive(userId: string, amount: number, type: Transaction['type'], description: string): Promise<boolean> {
-  const { data: user } = await supabase.from('users').select('hive_balance').eq('id', userId).maybeSingle();
-  if (!user || user.hive_balance < amount) return false;
-  await supabase.from('users').update({ hive_balance: user.hive_balance - amount }).eq('id', userId);
-  await supabase.from('transactions').insert({ user_id: userId, type, amount: -amount, description, status: 'completed' });
+export async function debitHive(
+  userId: string,
+  amount: number,
+  type: Transaction['type'],
+  description: string
+): Promise<boolean> {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    await autoSuspendUser(
+      userId,
+      `Invalid debit amount detected: ${String(amount)}`
+    );
+    return false;
+  }
+
+  const guard = await checkNotSuspended(userId);
+
+  if (!guard.ok) {
+    return false;
+  }
+
+  const { data: user } = await supabase
+    .from('users')
+    .select('hive_balance, permanent_ban, security_lock')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (!user || user.permanent_ban || user.security_lock) {
+    return false;
+  }
+
+  const balance = Number(user.hive_balance || 0);
+
+  if (!Number.isFinite(balance) || balance < amount) {
+    return false;
+  }
+
+  const newBalance = balance - amount;
+
+  const { error: updateError } = await supabase
+    .from('users')
+    .update({
+      hive_balance: newBalance,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', userId);
+
+  if (updateError) {
+    console.error('Debit failed:', updateError);
+    return false;
+  }
+
+  const { error: transactionError } = await supabase
+    .from('transactions')
+    .insert({
+      user_id: userId,
+      type,
+      amount: -amount,
+      description,
+      status: 'completed'
+    });
+
+  if (transactionError) {
+    console.error('Debit transaction failed:', transactionError);
+    return false;
+  }
+
   return true;
 }
 
@@ -361,13 +531,117 @@ async function creditReferralHive(userId: string, amount: number, description: s
 }
 
 // Claim all unclaimed referral rewards
-export async function claimReferralRewards(userId: string): Promise<{ success: boolean; hive: number; message: string }> {
+export async function claimReferralRewards(
+  userId: string
+): Promise<{ success: boolean; hive: number; message: string }> {
   const guard = await checkNotSuspended(userId);
-  if (!guard.ok) return { success: false, hive: 0, message: guard.message };
-  const { data: user } = await supabase.from('users').select('unclaimed_referral_hive, hive_balance').eq('id', userId).maybeSingle();
-  if (!user || !user.unclaimed_referral_hive || user.unclaimed_referral_hive <= 0) {
-    return { success: false, hive: 0, message: 'No referral rewards to claim' };
+
+  if (!guard.ok) {
+    return {
+      success: false,
+      hive: 0,
+      message: guard.message
+    };
   }
+
+  const { data: user } = await supabase
+    .from('users')
+    .select('unclaimed_referral_hive, permanent_ban, security_lock')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (!user) {
+    return {
+      success: false,
+      hive: 0,
+      message: 'User not found'
+    };
+  }
+
+  if (user.permanent_ban || user.security_lock) {
+    return {
+      success: false,
+      hive: 0,
+      message: 'Account security locked'
+    };
+  }
+
+  const pending = Number(user.unclaimed_referral_hive || 0);
+
+  if (!Number.isFinite(pending) || pending <= 0) {
+    return {
+      success: false,
+      hive: 0,
+      message: 'No referral rewards to claim'
+    };
+  }
+
+  const amount = Math.floor(pending * 100) / 100;
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    await autoSuspendUser(
+      userId,
+      'Invalid referral reward detected'
+    );
+
+    return {
+      success: false,
+      hive: 0,
+      message: 'Security violation detected'
+    };
+  }
+
+  try {
+    await creditHive(
+      userId,
+      amount,
+      'referral',
+      'Referral rewards claimed'
+    );
+
+    const { error } = await supabase
+      .from('users')
+      .update({
+        unclaimed_referral_hive: 0,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', userId);
+
+    if (error) {
+      await autoSuspendUser(
+        userId,
+        'Referral reward claim state update failed'
+      );
+
+      return {
+        success: false,
+        hive: 0,
+        message: 'Security error while claiming rewards'
+      };
+    }
+
+    await createNotification(
+      userId,
+      'referral',
+      'Referral Rewards Claimed!',
+      `You claimed ${amount} coins from referral rewards!`
+    );
+
+    return {
+      success: true,
+      hive: amount,
+      message: `+${amount} coins claimed!`
+    };
+  } catch (error) {
+    console.error('Referral claim error:', error);
+
+    return {
+      success: false,
+      hive: 0,
+      message: 'Unable to claim referral rewards'
+    };
+  }
+}
   const amount = Math.floor(user.unclaimed_referral_hive * 100) / 100;
   await supabase.from('users').update({ hive_balance: user.hive_balance + amount, unclaimed_referral_hive: 0 }).eq('id', userId);
   await supabase.from('transactions').insert({ user_id: userId, type: 'referral', amount, description: 'Referral rewards claimed', status: 'completed' });
@@ -458,31 +732,146 @@ export async function getTotalTodayAdCount(userId: string): Promise<number> {
   return count ?? 0;
 }
 
-export async function recordAdWatch(userId: string, providerId: string, hiveEarned: number): Promise<{ success: boolean; message: string }> {
+export async function recordAdWatch(
+  userId: string,
+  providerId: string,
+  hiveEarned: number
+): Promise<{ success: boolean; message: string }> {
   const guard = await checkNotSuspended(userId);
-  if (!guard.ok) return { success: false, message: guard.message };
 
-  const { data: provider } = await supabase.from('ad_providers').select('*').eq('id', providerId).maybeSingle();
-  if (!provider) return { success: false, message: 'Provider not found' };
+  if (!guard.ok) {
+    return {
+      success: false,
+      message: guard.message
+    };
+  }
 
-  const todayCount = await getTodayAdCount(userId, providerId);
-  if (todayCount >= provider.daily_limit) return { success: false, message: `Daily limit of ${provider.daily_limit} ads reached` };
+  const { data: provider } = await supabase
+    .from('ad_providers')
+    .select('*')
+    .eq('id', providerId)
+    .maybeSingle();
 
-  await supabase.from('ad_watches').insert({ user_id: userId, provider_id: providerId, hive_earned: hiveEarned, completed: true });
-  await creditHive(userId, hiveEarned, 'ad', `📺 Ad watched - ${provider.name}`);
+  if (!provider) {
+    return {
+      success: false,
+      message: 'Provider not found'
+    };
+  }
 
-  // 5% referral commission → unclaimed referral pool
-  const { data: referral } = await supabase.from('referrals').select('referrer_id, status').eq('referred_id', userId).maybeSingle();
-  if (referral && referral.status !== 'fake' && referral.status !== 'blocked') {
-    const commission = Math.round(hiveEarned * 0.05 * 100) / 100;
+  const serverReward = Number(provider.reward_per_ad);
+  const clientReward = Number(hiveEarned);
+
+  // Client is NEVER trusted for reward amount
+  if (
+    !Number.isFinite(clientReward) ||
+    !Number.isFinite(serverReward) ||
+    clientReward !== serverReward
+  ) {
+    await autoSuspendUser(
+      userId,
+      `Ad reward manipulation detected. Provider reward: ${serverReward}, submitted reward: ${clientReward}`
+    );
+
+    return {
+      success: false,
+      message: '🚫 Reward manipulation detected. Account permanently banned.'
+    };
+  }
+
+  if (serverReward <= 0) {
+    return {
+      success: false,
+      message: 'Invalid provider reward'
+    };
+  }
+
+  const todayCount = await getTodayAdCount(
+    userId,
+    providerId
+  );
+
+  if (todayCount >= provider.daily_limit) {
+    await autoSuspendUser(
+      userId,
+      `Ad daily limit violation. Limit: ${provider.daily_limit}, current count: ${todayCount}`
+    );
+
+    return {
+      success: false,
+      message: '🚫 Daily ad limit violation. Account permanently banned.'
+    };
+  }
+
+  const { error: watchError } = await supabase
+    .from('ad_watches')
+    .insert({
+      user_id: userId,
+      provider_id: providerId,
+      hive_earned: serverReward,
+      completed: true
+    });
+
+  if (watchError) {
+    return {
+      success: false,
+      message: watchError.message
+    };
+  }
+
+  try {
+    await creditHive(
+      userId,
+      serverReward,
+      'ad',
+      `📺 Ad watched - ${provider.name}`
+    );
+  } catch (error) {
+    console.error('Ad reward credit error:', error);
+
+    return {
+      success: false,
+      message: 'Unable to credit ad reward'
+    };
+  }
+
+  // 5% referral commission
+  const { data: referral } = await supabase
+    .from('referrals')
+    .select('referrer_id, status')
+    .eq('referred_id', userId)
+    .maybeSingle();
+
+  if (
+    referral &&
+    referral.status !== 'fake' &&
+    referral.status !== 'blocked'
+  ) {
+    const commission =
+      Math.round(serverReward * 0.05 * 100) / 100;
+
     if (commission > 0) {
-      await creditReferralHive(referral.referrer_id, commission, `🍯 5% commission from referral's ad`);
-      await createNotification(referral.referrer_id, 'commission', '🍯 5% Commission!', `Your referral watched an ad. You earned ${commission} 🍯 Hive commission! (Claim from Refer tab)`);
+      await creditReferralHive(
+        referral.referrer_id,
+        commission,
+        `🍯 5% commission from referral's ad`
+      );
+
+      await createNotification(
+        referral.referrer_id,
+        'commission',
+        '🍯 5% Commission!',
+        `Your referral watched an ad. You earned ${commission} 🍯 Hive commission! (Claim from Refer tab)`
+      );
     }
   }
 
   await checkReferralAdMilestones(userId);
-  return { success: true, message: `+${hiveEarned} Hive earned!` };
+
+  return {
+    success: true,
+    message: `+${serverReward} Hive earned!`
+  };
 }
 
 async function checkReferralAdMilestones(userId: string): Promise<void> {
@@ -552,16 +941,105 @@ export async function getTodayWebsiteVisits(userId: string): Promise<string[]> {
   return (data ?? []).map(v => v.website_id);
 }
 
-export async function recordWebsiteVisit(userId: string, websiteId: string, hiveReward: number): Promise<{ success: boolean; message: string }> {
+export async function recordWebsiteVisit(
+  userId: string,
+  websiteId: string,
+  hiveReward: number
+): Promise<{ success: boolean; message: string }> {
   const guard = await checkNotSuspended(userId);
-  if (!guard.ok) return { success: false, message: guard.message };
 
-  const alreadyVisited = await getTodayWebsiteVisit(userId, websiteId);
-  if (alreadyVisited) return { success: false, message: 'Already visited today' };
+  if (!guard.ok) {
+    return {
+      success: false,
+      message: guard.message
+    };
+  }
 
-  await supabase.from('website_visits').insert({ user_id: userId, website_id: websiteId, hive_earned: hiveReward });
-  await creditHive(userId, hiveReward, 'ad', `🌐 Website visit reward`);
-  return { success: true, message: `+${hiveReward} Hive earned!` };
+  const { data: website } = await supabase
+    .from('visit_websites')
+    .select('*')
+    .eq('id', websiteId)
+    .maybeSingle();
+
+  if (!website) {
+    return {
+      success: false,
+      message: 'Website not found'
+    };
+  }
+
+  const serverReward = Number(website.reward_hive);
+  const clientReward = Number(hiveReward);
+
+  // Never trust reward sent from client
+  if (
+    !Number.isFinite(clientReward) ||
+    !Number.isFinite(serverReward) ||
+    clientReward !== serverReward
+  ) {
+    await autoSuspendUser(
+      userId,
+      `Website reward manipulation detected. Server reward: ${serverReward}, submitted reward: ${clientReward}`
+    );
+
+    return {
+      success: false,
+      message: '🚫 Reward manipulation detected. Account permanently banned.'
+    };
+  }
+
+  const alreadyVisited = await getTodayWebsiteVisit(
+    userId,
+    websiteId
+  );
+
+  if (alreadyVisited) {
+    await autoSuspendUser(
+      userId,
+      `Duplicate website reward attempt: ${websiteId}`
+    );
+
+    return {
+      success: false,
+      message: '🚫 Duplicate reward attempt detected.'
+    };
+  }
+
+  const { error } = await supabase
+    .from('website_visits')
+    .insert({
+      user_id: userId,
+      website_id: websiteId,
+      hive_earned: serverReward
+    });
+
+  if (error) {
+    return {
+      success: false,
+      message: error.message
+    };
+  }
+
+  try {
+    await creditHive(
+      userId,
+      serverReward,
+      'ad',
+      `🌐 Website visit reward`
+    );
+  } catch (error) {
+    console.error('Website reward error:', error);
+
+    return {
+      success: false,
+      message: 'Unable to credit website reward'
+    };
+  }
+
+  return {
+    success: true,
+    message: `+${serverReward} Hive earned!`
+  };
 }
 
 // Admin CRUD for visit_websites
