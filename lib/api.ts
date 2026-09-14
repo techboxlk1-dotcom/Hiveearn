@@ -1401,9 +1401,169 @@ export async function claimMining(
       hive: 0,
       message: 'Unable to credit mining reward',
       miningStartedAt: user.mining_started_at,
-      dailyClaimsRemaining:
+export async function claimMining(
+  userId: string
+): Promise<{
+  success: boolean;
+  hive: number;
+  message: string;
+  miningStartedAt: string | null;
+  dailyClaimsRemaining: number;
+}> {
+  const guard = await checkNotSuspended(userId);
+
+  if (!guard.ok) {
+    return {
+      success: false,
+      hive: 0,
+      message: guard.message,
+      miningStartedAt: null,
+      dailyClaimsRemaining: 0
+    };
+  }
+
+  const { data: user, error: userError } = await supabase
+    .from('users')
+    .select(`
+      mining_started_at,
+      mining_daily_claims,
+      mining_last_claim_date
+    `)
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (userError) {
+    console.error('Mining user lookup failed:', userError);
+
+    return {
+      success: false,
+      hive: 0,
+      message: 'Unable to load mining account',
+      miningStartedAt: null,
+      dailyClaimsRemaining: 0
+    };
+  }
+
+  if (!user) {
+    return {
+      success: false,
+      hive: 0,
+      message: 'User not found',
+      miningStartedAt: null,
+      dailyClaimsRemaining: 0
+    };
+  }
+
+  if (!user.mining_started_at) {
+    return {
+      success: false,
+      hive: 0,
+      message: 'Mining not started',
+      miningStartedAt: null,
+      dailyClaimsRemaining: 0
+    };
+  }
+
+  const elapsedMs =
+    Date.now() -
+    new Date(user.mining_started_at).getTime();
+
+  const elapsedHours =
+    elapsedMs / (1000 * 60 * 60);
+
+  if (elapsedHours < 1) {
+    const minsLeft = Math.ceil(
+      60 - elapsedMs / (1000 * 60)
+    );
+
+    return {
+      success: false,
+      hive: 0,
+      message: `Only ${minsLeft} minutes elapsed. Need at least 1 hour to claim.`,
+      miningStartedAt: user.mining_started_at,
+      dailyClaimsRemaining: Math.max(
+        0,
         MINING_MAX_DAILY_CLAIMS -
-        currentDailyClaims
+          Number(user.mining_daily_claims ?? 0)
+      )
+    };
+  }
+
+  const today = new Date()
+    .toISOString()
+    .slice(0, 10);
+
+  const lastClaimDate = user.mining_last_claim_date
+    ? new Date(user.mining_last_claim_date)
+        .toISOString()
+        .slice(0, 10)
+    : null;
+
+  const currentDailyClaims =
+    lastClaimDate === today
+      ? Number(user.mining_daily_claims ?? 0)
+      : 0;
+
+  if (
+    currentDailyClaims >=
+    MINING_MAX_DAILY_CLAIMS
+  ) {
+    return {
+      success: false,
+      hive: 0,
+      message: `Daily mining limit reached (${MINING_MAX_DAILY_CLAIMS} claims/day). Come back tomorrow!`,
+      miningStartedAt: user.mining_started_at,
+      dailyClaimsRemaining: 0
+    };
+  }
+
+  const rate = Number(
+    await getMiningRate()
+  );
+
+  if (!Number.isFinite(rate) || rate <= 0) {
+    await autoSuspendUser(
+      userId,
+      'Invalid mining reward rate detected'
+    );
+
+    return {
+      success: false,
+      hive: 0,
+      message: 'Security error detected',
+      miningStartedAt: null,
+      dailyClaimsRemaining: 0
+    };
+  }
+
+  const hiveEarned = rate;
+  const newDailyClaims =
+    currentDailyClaims + 1;
+
+  try {
+    await creditHive(
+      userId,
+      hiveEarned,
+      'mining',
+      `⛏️ Mining reward — 1 session × ${rate} coins`
+    );
+  } catch (error) {
+    console.error(
+      'Mining credit error:',
+      error
+    );
+
+    return {
+      success: false,
+      hive: 0,
+      message: 'Unable to credit mining reward',
+      miningStartedAt: user.mining_started_at,
+      dailyClaimsRemaining:
+        Math.max(
+          0,
+          MINING_MAX_DAILY_CLAIMS -
+            currentDailyClaims
+        )
     };
   }
 
@@ -1419,17 +1579,22 @@ export async function claimMining(
       .eq('id', userId);
 
   if (stateError) {
-    await autoSuspendUser(
-      userId,
-      'Mining state integrity violation detected'
+    console.error(
+      'Mining state update failed:',
+      stateError
     );
 
     return {
       success: false,
-      hive: 0,
-      message: 'Security error detected',
+      hive: hiveEarned,
+      message: 'Reward credited, but mining state update failed. Please contact support.',
       miningStartedAt: null,
-      dailyClaimsRemaining: 0
+      dailyClaimsRemaining:
+        Math.max(
+          0,
+          MINING_MAX_DAILY_CLAIMS -
+            newDailyClaims
+        )
     };
   }
 
@@ -1451,11 +1616,11 @@ export async function claimMining(
     await sendBotMessage(
       userRecord.telegram_id,
       `⛏️ <b>Mining Reward Claimed!</b>\n\n` +
-      `${userRecord.first_name}, you earned <b>${hiveEarned} coins</b> from mining!\n\n` +
-      `⏱️ Mined for: 1 hour\n` +
-      `💰 Rate: ${rate} coins/session\n` +
-      `📊 Claims left today: ${MINING_MAX_DAILY_CLAIMS - newDailyClaims}\n\n` +
-      `Keep mining to earn more! 🚀`
+        `${userRecord.first_name}, you earned <b>${hiveEarned} coins</b> from mining!\n\n` +
+        `⏱️ Mined for: 1 hour\n` +
+        `💰 Rate: ${rate} coins/session\n` +
+        `📊 Claims left today: ${MINING_MAX_DAILY_CLAIMS - newDailyClaims}\n\n` +
+        `Keep mining to earn more! 🚀`
     );
   }
 
