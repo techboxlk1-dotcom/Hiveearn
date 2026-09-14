@@ -420,12 +420,16 @@ export async function creditHive(
   description: string,
   referenceId?: string
 ): Promise<void> {
+  if (!userId) {
+    throw new Error('User not found');
+  }
+
   if (!Number.isFinite(amount) || amount <= 0) {
     await autoSuspendUser(
       userId,
       `Invalid reward amount detected: ${String(amount)}`
     );
-    return;
+    throw new Error('Invalid reward amount');
   }
 
   const guard = await checkNotSuspended(userId);
@@ -434,28 +438,49 @@ export async function creditHive(
     throw new Error(guard.message);
   }
 
-  const { data: user } = await supabase
+  // Only use columns that existed in the original working flow.
+  const { data: user, error: userError } = await supabase
     .from('users')
-    .select('hive_balance, total_earned, permanent_ban, security_lock')
+    .select('hive_balance, total_earned')
     .eq('id', userId)
     .maybeSingle();
+
+  if (userError) {
+    console.error('Credit user lookup failed:', userError);
+    throw new Error('Unable to load user account.');
+  }
 
   if (!user) {
     throw new Error('User not found');
   }
 
-  if (user.permanent_ban || user.security_lock) {
-    throw new Error('Account security locked');
+  const currentBalance = Number(user.hive_balance || 0);
+  const currentTotalEarned = Number(user.total_earned || 0);
+
+  if (
+    !Number.isFinite(currentBalance) ||
+    !Number.isFinite(currentTotalEarned)
+  ) {
+    await autoSuspendUser(
+      userId,
+      'Invalid balance data detected'
+    );
+
+    throw new Error('Invalid balance data');
   }
 
-  const newBalance = Number(user.hive_balance || 0) + amount;
-  const newTotalEarned = Number(user.total_earned || 0) + amount;
+  const newBalance = currentBalance + amount;
+  const newTotalEarned = currentTotalEarned + amount;
 
-  if (!Number.isFinite(newBalance) || !Number.isFinite(newTotalEarned)) {
+  if (
+    !Number.isFinite(newBalance) ||
+    !Number.isFinite(newTotalEarned)
+  ) {
     await autoSuspendUser(
       userId,
       'Invalid balance calculation detected'
     );
+
     throw new Error('Invalid balance calculation');
   }
 
@@ -469,6 +494,7 @@ export async function creditHive(
     .eq('id', userId);
 
   if (updateError) {
+    console.error('Credit balance update failed:', updateError);
     throw new Error(updateError.message);
   }
 
@@ -487,7 +513,6 @@ export async function creditHive(
     console.error('Transaction insert failed:', transactionError);
   }
 }
-
 export async function debitHive(
   userId: string,
   amount: number,
