@@ -593,6 +593,14 @@ async function creditReferralHive(userId: string, amount: number, description: s
 export async function claimReferralRewards(
   userId: string
 ): Promise<{ success: boolean; hive: number; message: string }> {
+  if (!userId) {
+    return {
+      success: false,
+      hive: 0,
+      message: 'User not found'
+    };
+  }
+
   const guard = await checkNotSuspended(userId);
 
   if (!guard.ok) {
@@ -603,29 +611,28 @@ export async function claimReferralRewards(
     };
   }
 
+  // Use the original user fields for compatibility.
   const { data: user, error: userError } = await supabase
     .from('users')
-    .select(`
-      unclaimed_referral_hive,
-      permanent_ban,
-      security_lock
-    `)
+    .select('unclaimed_referral_hive, hive_balance')
     .eq('id', userId)
     .maybeSingle();
 
-  if (userError || !user) {
+  if (userError) {
+    console.error('Referral user lookup failed:', userError);
+
+    return {
+      success: false,
+      hive: 0,
+      message: 'Unable to load your account.'
+    };
+  }
+
+  if (!user) {
     return {
       success: false,
       hive: 0,
       message: 'User not found'
-    };
-  }
-
-  if (user.permanent_ban || user.security_lock) {
-    return {
-      success: false,
-      hive: 0,
-      message: 'Account security locked'
     };
   }
 
@@ -655,10 +662,7 @@ export async function claimReferralRewards(
   }
 
   try {
-    /*
-     * Credit the verified server-side amount.
-     * The client never decides the reward amount.
-     */
+    // Credit main balance first.
     await creditHive(
       userId,
       amount,
@@ -666,30 +670,25 @@ export async function claimReferralRewards(
       'Referral rewards claimed'
     );
 
-    /*
-     * Clear the unclaimed pool only after the balance
-     * credit succeeds.
-     */
+    // Clear referral pool only after successful credit.
     const { error: clearError } = await supabase
       .from('users')
       .update({
         unclaimed_referral_hive: 0,
         updated_at: new Date().toISOString()
       })
-      .eq('id', userId)
-      .eq('permanent_ban', false)
-      .eq('security_lock', false);
+      .eq('id', userId);
 
     if (clearError) {
-      await autoSuspendUser(
-        userId,
-        'Referral reward state integrity violation'
+      console.error(
+        'Referral pool clear failed:',
+        clearError
       );
 
       return {
         success: false,
         hive: 0,
-        message: '🚫 Security error while claiming rewards.'
+        message: 'Reward was credited but referral status could not be updated. Please contact admin.'
       };
     }
 
@@ -711,7 +710,10 @@ export async function claimReferralRewards(
     return {
       success: false,
       hive: 0,
-      message: 'Unable to claim referral rewards'
+      message:
+        error instanceof Error
+          ? error.message
+          : 'Unable to claim referral rewards'
     };
   }
 }
