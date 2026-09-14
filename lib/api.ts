@@ -514,6 +514,7 @@ export async function creditHive(
   }
 }
 export async function debitHive(
+export async function debitHive(
   userId: string,
   amount: number,
   type: Transaction['type'],
@@ -524,47 +525,107 @@ export async function debitHive(
       userId,
       `Invalid debit amount detected: ${String(amount)}`
     );
+
     return false;
   }
 
   const guard = await checkNotSuspended(userId);
 
   if (!guard.ok) {
+    console.error(
+      'Debit blocked by security guard:',
+      guard.message
+    );
+
     return false;
   }
 
-  const { data: user } = await supabase
+  const {
+    data: user,
+    error: userError
+  } = await supabase
     .from('users')
-    .select('hive_balance, permanent_ban, security_lock')
+    .select('hive_balance')
     .eq('id', userId)
     .maybeSingle();
 
-  if (!user || user.permanent_ban || user.security_lock) {
+  if (userError) {
+    console.error(
+      'Debit user lookup failed:',
+      userError
+    );
+
     return false;
   }
 
-  const balance = Number(user.hive_balance || 0);
+  if (!user) {
+    console.error(
+      'Debit failed: user not found',
+      userId
+    );
 
-  if (!Number.isFinite(balance) || balance < amount) {
     return false;
   }
 
-  const newBalance = balance - amount;
+  const balance = Number(
+    user.hive_balance ?? 0
+  );
 
-  const { error: updateError } = await supabase
+  if (!Number.isFinite(balance)) {
+    await autoSuspendUser(
+      userId,
+      'Invalid Hive balance detected during debit'
+    );
+
+    return false;
+  }
+
+  if (balance < amount) {
+    console.error(
+      `Debit failed: insufficient balance. Balance=${balance}, Amount=${amount}`
+    );
+
+    return false;
+  }
+
+  const newBalance =
+    balance - amount;
+
+  if (
+    !Number.isFinite(newBalance) ||
+    newBalance < 0
+  ) {
+    await autoSuspendUser(
+      userId,
+      'Invalid balance calculation during debit'
+    );
+
+    return false;
+  }
+
+  const {
+    error: updateError
+  } = await supabase
     .from('users')
     .update({
       hive_balance: newBalance,
       updated_at: new Date().toISOString()
     })
-    .eq('id', userId);
+    .eq('id', userId)
+    .gte('hive_balance', amount);
 
   if (updateError) {
-    console.error('Debit failed:', updateError);
+    console.error(
+      'Debit balance update failed:',
+      updateError
+    );
+
     return false;
   }
 
-  const { error: transactionError } = await supabase
+  const {
+    error: transactionError
+  } = await supabase
     .from('transactions')
     .insert({
       user_id: userId,
@@ -575,7 +636,29 @@ export async function debitHive(
     });
 
   if (transactionError) {
-    console.error('Debit transaction failed:', transactionError);
+    console.error(
+      'Debit transaction failed:',
+      transactionError
+    );
+
+    // Restore balance if transaction recording failed.
+    const {
+      error: rollbackError
+    } = await supabase
+      .from('users')
+      .update({
+        hive_balance: balance,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', userId);
+
+    if (rollbackError) {
+      console.error(
+        'Debit rollback failed:',
+        rollbackError
+      );
+    }
+
     return false;
   }
 
