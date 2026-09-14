@@ -249,44 +249,36 @@ export async function blockIp(adminId: string, ipAddress: string, reason: string
 
 // ─── Suspension Guard ─────────────────────────────────────────────────────────
 
-async function checkNotSuspended(userId: string): Promise<{ ok: boolean; message: string }> {
+async function checkNotSuspended(
+  userId: string
+): Promise<{ ok: boolean; message: string }> {
   const { data, error } = await supabase
     .from('users')
-    .select(`
-      is_suspended,
-      suspension_reason,
-      permanent_ban,
-      permanent_ban_reason,
-      security_lock
-    `)
+    .select('is_suspended, suspension_reason')
     .eq('id', userId)
     .maybeSingle();
 
-  if (error || !data) {
+  if (error) {
+    console.error('Security check failed:', error);
     return {
       ok: false,
-      message: 'Unable to verify account security.'
+      message: 'Unable to verify account.'
     };
   }
 
-  if (data.permanent_ban) {
+  if (!data) {
     return {
       ok: false,
-      message: `🚫 Your account is permanently banned. Reason: ${data.permanent_ban_reason ?? 'Security violation'}`
-    };
-  }
-
-  if (data.security_lock) {
-    return {
-      ok: false,
-      message: '🔒 Your account is security locked.'
+      message: 'User account not found.'
     };
   }
 
   if (data.is_suspended) {
     return {
       ok: false,
-      message: `Your account is suspended. Reason: ${data.suspension_reason ?? 'Policy violation'}`
+      message: `Your account is suspended. Reason: ${
+        data.suspension_reason ?? 'Policy violation'
+      }`
     };
   }
 
