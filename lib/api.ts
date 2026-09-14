@@ -514,7 +514,6 @@ export async function creditHive(
   }
 }
 export async function debitHive(
-export async function debitHive(
   userId: string,
   amount: number,
   type: Transaction['type'],
