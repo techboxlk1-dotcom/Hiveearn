@@ -1311,346 +1311,6 @@ export async function startMining(userId: string): Promise<{ success: boolean; m
   return { success: true, message: 'Mining started!', startedAt: now };
 }
 
-export async function claimMining(
-  userId: string
-): Promise<{
-  success: boolean;
-  hive: number;
-  message: string;
-  miningStartedAt: string | null;
-  dailyClaimsRemaining: number;
-}> {
-  const guard = await checkNotSuspended(userId);
-
-  if (!guard.ok) {
-    return {
-      success: false,
-      hive: 0,
-      message: guard.message,
-      miningStartedAt: null,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  const { data: user } = await supabase
-    .from('users')
-    .select(`
-      mining_started_at,
-      mining_daily_claims,
-      mining_last_claim_date,
-      permanent_ban,
-      security_lock
-    `)
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (!user) {
-    return {
-      success: false,
-      hive: 0,
-      message: 'User not found',
-      miningStartedAt: null,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  if (user.permanent_ban || user.security_lock) {
-    return {
-      success: false,
-      hive: 0,
-      message: 'Account security locked',
-      miningStartedAt: null,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  if (!user.mining_started_at) {
-    return {
-      success: false,
-      hive: 0,
-      message: 'Mining not started',
-      miningStartedAt: null,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  const elapsedMs =
-    Date.now() -
-    new Date(user.mining_started_at).getTime();
-
-  const elapsedHours =
-    elapsedMs / (1000 * 60 * 60);
-
-  if (elapsedHours < 1) {
-    const minsLeft = Math.ceil(
-      60 - elapsedMs / (1000 * 60)
-    );
-
-    return {
-      success: false,
-      hive: 0,
-      message: `Only ${minsLeft} minutes elapsed. Need at least 1 hour to claim.`,
-      miningStartedAt: user.mining_started_at,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  const today =
-    new Date().toISOString().slice(0, 10);
-
-  const lastClaimDate = user.mining_last_claim_date
-    ? new Date(user.mining_last_claim_date)
-        .toISOString()
-        .slice(0, 10)
-    : null;
-
-  const currentDailyClaims =
-    lastClaimDate === today
-      ? Number(user.mining_daily_claims ?? 0)
-      : 0;
-
-  if (
-    currentDailyClaims >=
-    MINING_MAX_DAILY_CLAIMS
-  ) {
-    return {
-      success: false,
-      hive: 0,
-      message: `Daily mining limit reached (${MINING_MAX_DAILY_CLAIMS} claims/day). Come back tomorrow!`,
-      miningStartedAt: user.mining_started_at,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  const rate = Number(await getMiningRate());
-
-  if (!Number.isFinite(rate) || rate <= 0) {
-    await autoSuspendUser(
-      userId,
-      'Invalid mining reward rate detected'
-    );
-
-    return {
-      success: false,
-      hive: 0,
-      message: 'Security error detected',
-      miningStartedAt: null,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  const hiveEarned = rate;
-  const newDailyClaims =
-    currentDailyClaims + 1;
-
-  try {
-    await creditHive(
-      userId,
-      hiveEarned,
-      'mining',
-      `⛏️ Mining reward — 1 session × ${rate} coins`
-    );
-  } catch (error) {
-    console.error('Mining credit error:', error);
-
-    return {
-      success: false,
-      hive: 0,
-      message: 'Unable to credit mining reward',
-      miningStartedAt: user.mining_started_at,
-export async function claimMining(
-  userId: string
-): Promise<{
-  success: boolean;
-  hive: number;
-  message: string;
-  miningStartedAt: string | null;
-  dailyClaimsRemaining: number;
-}> {
-  const guard = await checkNotSuspended(userId);
-
-  if (!guard.ok) {
-    return {
-      success: false,
-      hive: 0,
-      message: guard.message,
-      miningStartedAt: null,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  const { data: user, error: userError } = await supabase
-    .from('users')
-    .select(`
-      mining_started_at,
-      mining_daily_claims,
-      mining_last_claim_date
-    `)
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (userError) {
-    console.error('Mining user lookup failed:', userError);
-
-    return {
-      success: false,
-      hive: 0,
-      message: 'Unable to load mining account',
-      miningStartedAt: null,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  if (!user) {
-    return {
-      success: false,
-      hive: 0,
-      message: 'User not found',
-      miningStartedAt: null,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  if (!user.mining_started_at) {
-    return {
-      success: false,
-      hive: 0,
-      message: 'Mining not started',
-      miningStartedAt: null,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  const elapsedMs =
-    Date.now() -
-    new Date(user.mining_started_at).getTime();
-
-  const elapsedHours =
-    elapsedMs / (1000 * 60 * 60);
-
-  if (elapsedHours < 1) {
-    const minsLeft = Math.ceil(
-      60 - elapsedMs / (1000 * 60)
-    );
-
-    return {
-      success: false,
-      hive: 0,
-      message: `Only ${minsLeft} minutes elapsed. Need at least 1 hour to claim.`,
-      miningStartedAt: user.mining_started_at,
-      dailyClaimsRemaining: Math.max(
-        0,
-        MINING_MAX_DAILY_CLAIMS -
-          Number(user.mining_daily_claims ?? 0)
-      )
-    };
-  }
-
-  const today = new Date()
-    .toISOString()
-    .slice(0, 10);
-
-  const lastClaimDate = user.mining_last_claim_date
-    ? new Date(user.mining_last_claim_date)
-        .toISOString()
-        .slice(0, 10)
-    : null;
-
-  const currentDailyClaims =
-    lastClaimDate === today
-      ? Number(user.mining_daily_claims ?? 0)
-      : 0;
-
-  if (
-    currentDailyClaims >=
-    MINING_MAX_DAILY_CLAIMS
-  ) {
-    return {
-      success: false,
-      hive: 0,
-      message: `Daily mining limit reached (${MINING_MAX_DAILY_CLAIMS} claims/day). Come back tomorrow!`,
-      miningStartedAt: user.mining_started_at,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  const rate = Number(
-    await getMiningRate()
-  );
-
-  if (!Number.isFinite(rate) || rate <= 0) {
-    await autoSuspendUser(
-      userId,
-      'Invalid mining reward rate detected'
-    );
-
-    return {
-      success: false,
-      hive: 0,
-      message: 'Security error detected',
-      miningStartedAt: null,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  const hiveEarned = rate;
-  const newDailyClaims =
-    currentDailyClaims + 1;
-
-  try {
-    await creditHive(
-      userId,
-      hiveEarned,
-      'mining',
-      `⛏️ Mining reward — 1 session × ${rate} coins`
-    );
-  } catch (error) {
-    console.error(
-      'Mining credit error:',
-      error
-    );
-
-    return {
-      success: false,
-      hive: 0,
-      message: 'Unable to credit mining reward',
-      miningStartedAt: user.mining_started_at,
-      dailyClaimsRemaining:
-        Math.max(
-          0,
-          MINING_MAX_DAILY_CLAIMS -
-            currentDailyClaims
-        )
-    };
-  }
-
-  const { error: stateError } =
-    await supabase
-      .from('users')
-      .update({
-        mining_started_at: null,
-        mining_daily_claims: newDailyClaims,
-        mining_last_claim_date: today,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', userId);
-
-  if (stateError) {
-    console.error(
-      'Mining state update failed:',
-      stateError
-    );
-
-    return {
-      success: false,
-      hive: hiveEarned,
-      message: 'Reward credited, but mining state update failed. Please contact support.',
-      miningStartedAt: null,
-      dailyClaimsRemaining:
-        Math.max(
-          0,
-          MINING_MAX_DAILY_CLAIMS -
-            newDailyClaims
 // ─── Mining (Hourly Hive) ─────────────────────────────────────────────────────
 
 const MINING_COINS_PER_SESSION = 100;
@@ -1658,9 +1318,13 @@ const MINING_MAX_DAILY_CLAIMS = 10;
 
 async function getMiningRate(): Promise<number> {
   const settings = await getAppSettings();
-  return parseInt(
-    settings['mining_rate_per_hour'] ?? '100'
-  ) || MINING_COINS_PER_SESSION;
+
+  return (
+    parseInt(
+      settings['mining_rate_per_hour'] ?? '100',
+      10
+    ) || MINING_COINS_PER_SESSION
+  );
 }
 
 export async function startMining(
@@ -1680,7 +1344,10 @@ export async function startMining(
     };
   }
 
-  const { data: user, error } = await supabase
+  const {
+    data: user,
+    error
+  } = await supabase
     .from('users')
     .select(
       'mining_started_at, mining_daily_claims, mining_last_claim_date'
@@ -1732,7 +1399,9 @@ export async function startMining(
 
   const dailyClaims =
     lastClaimDate === today
-      ? Number(user.mining_daily_claims ?? 0)
+      ? Number(
+          user.mining_daily_claims ?? 0
+        )
       : 0;
 
   if (
@@ -1750,14 +1419,15 @@ export async function startMining(
   const now =
     new Date().toISOString();
 
-  const { error: updateError } =
-    await supabase
-      .from('users')
-      .update({
-        mining_started_at: now,
-        mining_notified: false
-      })
-      .eq('id', userId);
+  const {
+    error: updateError
+  } = await supabase
+    .from('users')
+    .update({
+      mining_started_at: now,
+      mining_notified: false
+    })
+    .eq('id', userId);
 
   if (updateError) {
     console.error(
@@ -1778,7 +1448,6 @@ export async function startMining(
     startedAt: now
   };
 }
-
 
 export async function claimMining(
   userId: string
@@ -1822,7 +1491,8 @@ export async function claimMining(
     return {
       success: false,
       hive: 0,
-      message: 'Unable to load mining account',
+      message:
+        'Unable to load mining account',
       miningStartedAt: null,
       dailyClaimsRemaining: 0
     };
@@ -1844,8 +1514,7 @@ export async function claimMining(
       hive: 0,
       message: 'Mining not started',
       miningStartedAt: null,
-      dailyClaimsRemaining:
-        MINING_MAX_DAILY_CLAIMS
+      dailyClaimsRemaining: 0
     };
   }
 
@@ -1950,19 +1619,16 @@ export async function claimMining(
     currentDailyClaims + 1;
 
   /*
-   * IMPORTANT:
-   * Credit reward BEFORE marking the
-   * mining session as claimed.
-   *
-   * If credit fails, the mining session
-   * remains available for retry.
+   * Credit reward first.
+   * Mining session is closed only
+   * after the reward is successfully credited.
    */
   try {
     await creditHive(
       userId,
       hiveEarned,
       'mining',
-      `⛏️ Mining reward — 1 session × ${rate} coins`
+      `⛏️ Mining reward - 1 session × ${rate} coins`
     );
   } catch (error) {
     console.error(
@@ -1986,10 +1652,6 @@ export async function claimMining(
     };
   }
 
-  /*
-   * Reward was successfully credited.
-   * Now close this mining session.
-   */
   const {
     error: stateError
   } = await supabase
@@ -2012,10 +1674,6 @@ export async function claimMining(
       stateError
     );
 
-    /*
-     * Do not hide the successful reward.
-     * The reward has already been credited.
-     */
     return {
       success: true,
       hive: hiveEarned,
@@ -2038,25 +1696,35 @@ export async function claimMining(
     `You earned ${hiveEarned} coins from mining!`
   );
 
-  const {
-    data: userRecord
-  } = await supabase
-    .from('users')
-    .select(
-      'telegram_id, first_name'
-    )
-    .eq('id', userId)
-    .maybeSingle();
+  try {
+    const {
+      data: userRecord
+    } = await supabase
+      .from('users')
+      .select(
+        'telegram_id, first_name'
+      )
+      .eq('id', userId)
+      .maybeSingle();
 
-  if (userRecord) {
-    await sendBotMessage(
-      userRecord.telegram_id,
-      `⛏️ <b>Mining Reward Claimed!</b>\n\n` +
-      `${userRecord.first_name}, you earned <b>${hiveEarned} coins</b> from mining!\n\n` +
-      `⏱️ Mined for: 1 hour\n` +
-      `💰 Rate: ${rate} coins/session\n` +
-      `📊 Claims left today: ${MINING_MAX_DAILY_CLAIMS - newDailyClaims}\n\n` +
-      `Keep mining to earn more! 🚀`
+    if (userRecord) {
+      await sendBotMessage(
+        userRecord.telegram_id,
+        `⛏️ <b>Mining Reward Claimed!</b>\n\n` +
+        `${userRecord.first_name}, you earned <b>${hiveEarned} coins</b> from mining!\n\n` +
+        `⏱️ Mined for: 1 hour\n` +
+        `💰 Rate: ${rate} coins/session\n` +
+        `📊 Claims left today: ${
+          MINING_MAX_DAILY_CLAIMS -
+          newDailyClaims
+        }\n\n` +
+        `Keep mining to earn more! 🚀`
+      );
+    }
+  } catch (error) {
+    console.error(
+      'Mining Telegram notification failed:',
+      error
     );
   }
 
@@ -2071,7 +1739,6 @@ export async function claimMining(
       newDailyClaims
   };
 }
-
 
 export async function getMiningStatus(
   userId: string
@@ -2142,9 +1809,7 @@ export async function getMiningStatus(
   const rate =
     await getMiningRate();
 
-  if (
-    !user?.mining_started_at
-  ) {
+  if (!user?.mining_started_at) {
     return {
       isMining: false,
       startedAt: null,
@@ -2169,21 +1834,28 @@ export async function getMiningStatus(
 
   if (elapsedHours >= 1) {
     if (!user.mining_notified) {
-      const {
-        data: u
-      } = await supabase
-        .from('users')
-        .select('telegram_id')
-        .eq('id', userId)
-        .maybeSingle();
+      try {
+        const {
+          data: telegramUser
+        } = await supabase
+          .from('users')
+          .select('telegram_id')
+          .eq('id', userId)
+          .maybeSingle();
 
-      if (u?.telegram_id) {
-        await sendBotMessage(
-          u.telegram_id,
-          `⛏️ <b>Mining Complete!</b>\n\n` +
-          `Your mining session has finished. ` +
-          `You earned <b>${rate} coins</b>!\n\n` +
-          `Open the app to claim your reward and start mining again. 🚀`
+        if (telegramUser?.telegram_id) {
+          await sendBotMessage(
+            telegramUser.telegram_id,
+            `⛏️ <b>Mining Complete!</b>\n\n` +
+            `Your mining session has finished. ` +
+            `You earned <b>${rate} coins</b>!\n\n` +
+            `Open the app to claim your reward and start mining again. 🚀`
+          );
+        }
+      } catch (error) {
+        console.error(
+          'Mining completion notification error:',
+          error
         );
       }
 
