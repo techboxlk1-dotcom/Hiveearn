@@ -252,6 +252,15 @@ export async function blockIp(adminId: string, ipAddress: string, reason: string
 async function checkNotSuspended(
   userId: string
 ): Promise<{ ok: boolean; message: string }> {
+  if (!userId) {
+    return {
+      ok: false,
+      message: 'Unable to verify account.'
+    };
+  }
+
+  // Keep this check compatible with the original users table.
+  // Security fields are checked separately by reward functions.
   const { data, error } = await supabase
     .from('users')
     .select('is_suspended, suspension_reason')
@@ -259,7 +268,8 @@ async function checkNotSuspended(
     .maybeSingle();
 
   if (error) {
-    console.error('Security check failed:', error);
+    console.error('Account security check error:', error);
+
     return {
       ok: false,
       message: 'Unable to verify account.'
@@ -267,6 +277,8 @@ async function checkNotSuspended(
   }
 
   if (!data) {
+    console.error('Account security check: user not found:', userId);
+
     return {
       ok: false,
       message: 'User account not found.'
