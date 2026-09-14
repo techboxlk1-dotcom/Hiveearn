@@ -497,180 +497,72 @@ export async function creditHive(
     );
   }
 }
-export async function debitHive(
-  userId: string,
-  amount: number,
-  type: Transaction['type'],
-  description: string
-): Promise<boolean> {
-  if (!Number.isFinite(amount) || amount <= 0) {
-    await autoSuspendUser(
-      userId,
-      `Invalid debit amount detected: ${String(amount)}`
-    );
 
-    return false;
-  }
+🚀 PEMEX INVESTMENT PLATFORM 💰
 
-  const guard = await checkNotSuspended(userId);
+💎 Invest in VIP Packages & Earn Daily Returns!
 
-  if (!guard.ok) {
-    console.error(
-      'Debit blocked by security guard:',
-      guard.message
-    );
+Looking for an online investment platform? Explore Pemex and its available VIP investment packages.
 
-    return false;
-  }
+🔥 VIP PACKAGES & DAILY RETURNS
 
-  const {
-    data: user,
-    error: userError
-  } = await supabase
-    .from('users')
-    .select('hive_balance')
-    .eq('id', userId)
-    .maybeSingle();
+💰 VIP1 – 4.1 USDT
+📈 Daily Return: 1.59 USDT
 
-  if (userError) {
-    console.error(
-      'Debit user lookup failed:',
-      userError
-    );
+💰 VIP2 – 9.1 USDT
+📈 Daily Return: 3.54 USDT
 
-    return false;
-  }
+💰 VIP3 – 41 USDT
+📈 Daily Return: 16.4 USDT
 
-  if (!user) {
-    console.error(
-      'Debit failed: user not found',
-      userId
-    );
+💰 VIP4 – 110 USDT
+📈 Daily Return: 44 USDT
 
-    return false;
-  }
+💰 VIP5 – 310 USDT
+📈 Daily Return: 127.1 USDT
 
-  const balance = Number(
-    user.hive_balance ?? 0
-  );
+💰 VIP6 – 710 USDT
+📈 Daily Return: 291.1 USDT
 
-export async function debitHive(
-  userId: string,
-  amount: number,
-  type: Transaction['type'],
-  description: string
-): Promise<boolean> {
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return false;
-  }
+💰 VIP7 – 1,100 USDT
+📈 Daily Return: 462 USDT
 
-  const guard = await checkNotSuspended(userId);
+💰 VIP8 – 2,100 USDT
+📈 Daily Return: 882 USDT
 
-  if (!guard.ok) {
-    console.error(
-      'debitHive security check failed:',
-      guard.message
-    );
-    return false;
-  }
+💰 VIP9 – 4,100 USDT
+📈 Daily Return: 1,763 USDT
 
-  const { data: user, error: userError } = await supabase
-    .from('users')
-    .select('hive_balance')
-    .eq('id', userId)
-    .maybeSingle();
+💰 VIP10 – 9,100 USDT
+📈 Daily Return: 3,913 USDT
 
-  if (userError) {
-    console.error(
-      'debitHive user lookup error:',
-      userError
-    );
-    return false;
-  }
+💰 VIP11 – 21,000 USDT
+📈 Daily Return: 9,450 USDT
 
-  if (!user) {
-    console.error(
-      'debitHive: User not found:',
-      userId
-    );
-    return false;
-  }
+💰 VIP12 – 51,000 USDT
+📈 Daily Return: 25,500 USDT
 
-  const currentBalance = Number(
-    user.hive_balance ?? 0
-  );
+⏳ Returns are stated to continue for 100 days.
 
-  if (!Number.isFinite(currentBalance)) {
-    console.error(
-      'debitHive: Invalid balance'
-    );
-    return false;
-  }
+🎁 REFERRAL COMMISSION
 
-  if (currentBalance < amount) {
-    console.error(
-      `debitHive: Insufficient balance. Current=${currentBalance}, Required=${amount}`
-    );
-    return false;
-  }
+Invite friends and earn commissions from eligible investments:
 
-  const newBalance =
-    currentBalance - amount;
+🥇 Level A – 18%
+🥈 Level B – 3%
+🥉 Level C – 1%
 
-  if (
-    !Number.isFinite(newBalance) ||
-    newBalance < 0
-  ) {
-    return false;
-  }
+💸 WITHDRAWAL
+▪️ Withdraw once daily
+▪️ No withdrawal fees stated
+▪️ Minimum withdrawal: Not specified in the provided details
 
-  const { error: updateError } = await supabase
-    .from('users')
-    .update({
-      hive_balance: newBalance,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', userId);
+🚀 JOIN PEMEX TODAY!
 
-  if (updateError) {
-    console.error(
-      'debitHive balance update error:',
-      updateError
-    );
-    return false;
-  }
+👉 Register Now:
+https://z.rd-plan.vip/#/register?invite_code=qdgiba
 
-  const { error: transactionError } =
-    await supabase
-      .from('transactions')
-      .insert({
-        user_id: userId,
-        type,
-        amount: -amount,
-        description,
-        status: 'completed'
-      });
-
-  if (transactionError) {
-    console.error(
-      'debitHive transaction error:',
-      transactionError
-    );
-
-    // Restore the balance if transaction recording failed.
-    await supabase
-      .from('users')
-      .update({
-        hive_balance: currentBalance,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', userId);
-
-    return false;
-  }
-
-  return true;
-}
+⚠️ Investment involves risk. Please verify the platform, investment terms, and withdrawal conditions independently before depositing funds. Returns are not guaranteed.
 // Credit referral hive to unclaimed pool (NOT main balance)
 async function creditReferralHive(userId: string, amount: number, description: string): Promise<void> {
   const { data: user } = await supabase.from('users').select('unclaimed_referral_hive').eq('id', userId).maybeSingle();
