@@ -420,15 +420,7 @@ export async function creditHive(
   description: string,
   referenceId?: string
 ): Promise<void> {
-  if (!userId) {
-    throw new Error('User not found');
-  }
-
   if (!Number.isFinite(amount) || amount <= 0) {
-    await autoSuspendUser(
-      userId,
-      `Invalid reward amount detected: ${String(amount)}`
-    );
     throw new Error('Invalid reward amount');
   }
 
@@ -438,7 +430,6 @@ export async function creditHive(
     throw new Error(guard.message);
   }
 
-  // Only use columns that existed in the original working flow.
   const { data: user, error: userError } = await supabase
     .from('users')
     .select('hive_balance, total_earned')
@@ -446,27 +437,22 @@ export async function creditHive(
     .maybeSingle();
 
   if (userError) {
-    console.error('Credit user lookup failed:', userError);
-    throw new Error('Unable to load user account.');
+    console.error('creditHive user lookup error:', userError);
+    throw new Error('User not found');
   }
 
   if (!user) {
     throw new Error('User not found');
   }
 
-  const currentBalance = Number(user.hive_balance || 0);
-  const currentTotalEarned = Number(user.total_earned || 0);
+  const currentBalance = Number(user.hive_balance ?? 0);
+  const currentTotalEarned = Number(user.total_earned ?? 0);
 
   if (
     !Number.isFinite(currentBalance) ||
     !Number.isFinite(currentTotalEarned)
   ) {
-    await autoSuspendUser(
-      userId,
-      'Invalid balance data detected'
-    );
-
-    throw new Error('Invalid balance data');
+    throw new Error('Invalid balance');
   }
 
   const newBalance = currentBalance + amount;
@@ -476,11 +462,6 @@ export async function creditHive(
     !Number.isFinite(newBalance) ||
     !Number.isFinite(newTotalEarned)
   ) {
-    await autoSuspendUser(
-      userId,
-      'Invalid balance calculation detected'
-    );
-
     throw new Error('Invalid balance calculation');
   }
 
@@ -494,7 +475,7 @@ export async function creditHive(
     .eq('id', userId);
 
   if (updateError) {
-    console.error('Credit balance update failed:', updateError);
+    console.error('creditHive balance update error:', updateError);
     throw new Error(updateError.message);
   }
 
@@ -510,10 +491,12 @@ export async function creditHive(
     });
 
   if (transactionError) {
-    console.error('Transaction insert failed:', transactionError);
+    console.error(
+      'creditHive transaction insert error:',
+      transactionError
+    );
   }
 }
-
 export async function debitHive(
   userId: string,
   amount: number,
@@ -571,100 +554,123 @@ export async function debitHive(
     user.hive_balance ?? 0
   );
 
-  if (!Number.isFinite(balance)) {
-    await autoSuspendUser(
-      userId,
-      'Invalid Hive balance detected during debit'
-    );
-
+export async function debitHive(
+  userId: string,
+  amount: number,
+  type: Transaction['type'],
+  description: string
+): Promise<boolean> {
+  if (!Number.isFinite(amount) || amount <= 0) {
     return false;
   }
 
-  if (balance < amount) {
-    console.error(
-      `Debit failed: insufficient balance. Balance=${balance}, Amount=${amount}`
-    );
+  const guard = await checkNotSuspended(userId);
 
+  if (!guard.ok) {
+    console.error(
+      'debitHive security check failed:',
+      guard.message
+    );
+    return false;
+  }
+
+  const { data: user, error: userError } = await supabase
+    .from('users')
+    .select('hive_balance')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (userError) {
+    console.error(
+      'debitHive user lookup error:',
+      userError
+    );
+    return false;
+  }
+
+  if (!user) {
+    console.error(
+      'debitHive: User not found:',
+      userId
+    );
+    return false;
+  }
+
+  const currentBalance = Number(
+    user.hive_balance ?? 0
+  );
+
+  if (!Number.isFinite(currentBalance)) {
+    console.error(
+      'debitHive: Invalid balance'
+    );
+    return false;
+  }
+
+  if (currentBalance < amount) {
+    console.error(
+      `debitHive: Insufficient balance. Current=${currentBalance}, Required=${amount}`
+    );
     return false;
   }
 
   const newBalance =
-    balance - amount;
+    currentBalance - amount;
 
   if (
     !Number.isFinite(newBalance) ||
     newBalance < 0
   ) {
-    await autoSuspendUser(
-      userId,
-      'Invalid balance calculation during debit'
-    );
-
     return false;
   }
 
-  const {
-    error: updateError
-  } = await supabase
+  const { error: updateError } = await supabase
     .from('users')
     .update({
       hive_balance: newBalance,
       updated_at: new Date().toISOString()
     })
-    .eq('id', userId)
-    .gte('hive_balance', amount);
+    .eq('id', userId);
 
   if (updateError) {
     console.error(
-      'Debit balance update failed:',
+      'debitHive balance update error:',
       updateError
     );
-
     return false;
   }
 
-  const {
-    error: transactionError
-  } = await supabase
-    .from('transactions')
-    .insert({
-      user_id: userId,
-      type,
-      amount: -amount,
-      description,
-      status: 'completed'
-    });
+  const { error: transactionError } =
+    await supabase
+      .from('transactions')
+      .insert({
+        user_id: userId,
+        type,
+        amount: -amount,
+        description,
+        status: 'completed'
+      });
 
   if (transactionError) {
     console.error(
-      'Debit transaction failed:',
+      'debitHive transaction error:',
       transactionError
     );
 
-    // Restore balance if transaction recording failed.
-    const {
-      error: rollbackError
-    } = await supabase
+    // Restore the balance if transaction recording failed.
+    await supabase
       .from('users')
       .update({
-        hive_balance: balance,
+        hive_balance: currentBalance,
         updated_at: new Date().toISOString()
       })
       .eq('id', userId);
-
-    if (rollbackError) {
-      console.error(
-        'Debit rollback failed:',
-        rollbackError
-      );
-    }
 
     return false;
   }
 
   return true;
 }
-
 // Credit referral hive to unclaimed pool (NOT main balance)
 async function creditReferralHive(userId: string, amount: number, description: string): Promise<void> {
   const { data: user } = await supabase.from('users').select('unclaimed_referral_hive').eq('id', userId).maybeSingle();
