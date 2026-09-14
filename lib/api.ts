@@ -513,6 +513,7 @@ export async function creditHive(
     console.error('Transaction insert failed:', transactionError);
   }
 }
+
 export async function debitHive(
   userId: string,
   amount: number,
