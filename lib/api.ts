@@ -130,108 +130,12 @@ export async function detectAndHandleIpAbuse(userId: string, ipAddress: string):
 }
 
 async function autoSuspendUser(userId: string, reason: string): Promise<void> {
-  const { data: user, error: userError } = await supabase
-    .from('users')
-    .select(`
-      id,
-      is_admin,
-      is_suspended,
-      permanent_ban,
-      telegram_id,
-      first_name,
-      username,
-      ip_address
-    `)
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (userError) {
-    console.error('Failed to load user for security action:', userError);
-    return;
-  }
-
-  if (!user) {
-    console.error('User not found for security action:', userId);
-    return;
-  }
-
-  // Already permanently banned
-  if (user.permanent_ban) {
-    return;
-  }
-
-  const banReason = `Fraud / Security violation: ${reason}`;
-  const now = new Date().toISOString();
-
-  const { error: banError } = await supabase
-    .from('users')
-    .update({
-      permanent_ban: true,
-      permanent_ban_reason: banReason,
-      permanently_banned_at: now,
-      security_lock: true,
-      is_suspended: true,
-      suspension_reason: banReason,
-      updated_at: now,
-    })
-    .eq('id', userId);
-
-  if (banError) {
-    console.error('Permanent ban failed:', banError);
-    return;
-  }
-
-  // Security notification
-  try {
-    await createNotification(
-      userId,
-      'security',
-      'Account Permanently Banned',
-      'Your account has been permanently banned بسبب a security/fraud violation.'
-    );
-  } catch (error) {
-    console.error('Failed to create ban notification:', error);
-  }
-
-  // Telegram notification
-  try {
-    await sendBotMessage(
-      user.telegram_id,
-      `🚨 ACCOUNT PERMANENTLY BANNED\n\n` +
-      `👤 User: ${user.first_name || 'Unknown'}\n` +
-      `🆔 Telegram ID: ${user.telegram_id}\n\n` +
-      `⚠️ Reason:\n${banReason}\n\n` +
-      `🔒 This ban is permanent.`
-    );
-  } catch (error) {
-    console.error('Failed to send Telegram ban notification:', error);
-  }
-
-  // Fraud log
-  try {
-    await supabase.from('fraud_logs').insert({
-      user_id: userId,
-      type: 'other',
-      description: `Permanent fraud ban: ${banReason}`,
-      ip_address: user.ip_address ?? null,
-      severity: 'critical',
-    });
-  } catch (error) {
-    console.error('Failed to create fraud log:', error);
-  }
-
-  // Notify admin
-  try {
-    await notifyAdmin(
-      `🚨 PERMANENT FRAUD BAN\n\n` +
-      `👤 User: ${user.first_name || 'Unknown'}\n` +
-      `🆔 Telegram ID: ${user.telegram_id}\n` +
-      `🔒 Permanent ban: YES\n\n` +
-      `⚠️ Reason:\n${banReason}`
-    );
-  } catch (error) {
-    console.error('Failed to notify admin:', error);
-  }
+  const { data: user } = await supabase.from('users').select('is_admin, is_suspended, telegram_id, first_name, username, ip_address').eq('id', userId).maybeSingle();
+  if (!user || user.is_admin || user.is_suspended) return;
+  await supabase.from('users').update({ is_suspended: true, suspension_reason: reason }).eq('id', userId);
+  await createNotification(userId, 'suspended', 'Account Suspended', `Your account has been automatically suspended. Reason: ${reason}`);
+  await sendBotMessage(user.telegram_id, `🚫 <b>Account Suspended</b>\n\nYour Hive Earn account has been suspended.\n\n<b>Reason:</b> ${reason}\n\nIf you believe this is a mistake, contact support: @hiveearn`, false);
+  await notifyAdmin(`🚫 <b>User Auto-Suspended</b>\n\nUser: ${user.first_name}${user.username ? ` (@${user.username})` : ''}\nTelegram ID: <code>${user.telegram_id}</code>${user.ip_address ? `\nIP: <code>${user.ip_address}</code>` : ''}\n\n<b>Reason:</b> ${reason}`);
 }
 
 export async function isIpBlockedForReferral(ipAddress: string): Promise<boolean> {
@@ -249,55 +153,10 @@ export async function blockIp(adminId: string, ipAddress: string, reason: string
 
 // ─── Suspension Guard ─────────────────────────────────────────────────────────
 
-async function checkNotSuspended(
-  userId: string
-): Promise<{ ok: boolean; message: string }> {
-  if (!userId) {
-    return {
-      ok: false,
-      message: 'Unable to verify account.'
-    };
-  }
-
-  // Keep this check compatible with the original users table.
-  // Security fields are checked separately by reward functions.
-  const { data, error } = await supabase
-    .from('users')
-    .select('is_suspended, suspension_reason')
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (error) {
-    console.error('Account security check error:', error);
-
-    return {
-      ok: false,
-      message: 'Unable to verify account.'
-    };
-  }
-
-  if (!data) {
-    console.error('Account security check: user not found:', userId);
-
-    return {
-      ok: false,
-      message: 'User account not found.'
-    };
-  }
-
-  if (data.is_suspended) {
-    return {
-      ok: false,
-      message: `Your account is suspended. Reason: ${
-        data.suspension_reason ?? 'Policy violation'
-      }`
-    };
-  }
-
-  return {
-    ok: true,
-    message: ''
-  };
+async function checkNotSuspended(userId: string): Promise<{ ok: boolean; message: string }> {
+  const { data } = await supabase.from('users').select('is_suspended, suspension_reason').eq('id', userId).maybeSingle();
+  if (data?.is_suspended) return { ok: false, message: `Your account is suspended. Reason: ${data.suspension_reason ?? 'Policy violation'}` };
+  return { ok: true, message: '' };
 }
 
 // ─── User ────────────────────────────────────────────────────────────────────
@@ -413,231 +272,20 @@ export async function getUserByTelegramId(telegramId: number): Promise<User | nu
 
 // ─── Balance ─────────────────────────────────────────────────────────────────
 
-export async function creditHive(
-  userId: string,
-  amount: number,
-  type: Transaction['type'],
-  description: string,
-  referenceId?: string
-): Promise<void> {
-  if (!Number.isFinite(amount) || amount <= 0) {
-    throw new Error('Invalid reward amount');
-  }
-
-  const guard = await checkNotSuspended(userId);
-
-  if (!guard.ok) {
-    throw new Error(guard.message);
-  }
-
-  const { data: user, error: userError } = await supabase
-    .from('users')
-    .select('hive_balance, total_earned')
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (userError) {
-    console.error('creditHive user lookup error:', userError);
-    throw new Error('User not found');
-  }
-
-  if (!user) {
-    throw new Error('User not found');
-  }
-
-  const currentBalance = Number(user.hive_balance ?? 0);
-  const currentTotalEarned = Number(user.total_earned ?? 0);
-
-  if (
-    !Number.isFinite(currentBalance) ||
-    !Number.isFinite(currentTotalEarned)
-  ) {
-    throw new Error('Invalid balance');
-  }
-
-  const newBalance = currentBalance + amount;
-  const newTotalEarned = currentTotalEarned + amount;
-
-  if (
-    !Number.isFinite(newBalance) ||
-    !Number.isFinite(newTotalEarned)
-  ) {
-    throw new Error('Invalid balance calculation');
-  }
-
-  const { error: updateError } = await supabase
-    .from('users')
-    .update({
-      hive_balance: newBalance,
-      total_earned: newTotalEarned,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', userId);
-
-  if (updateError) {
-    console.error('creditHive balance update error:', updateError);
-    throw new Error(updateError.message);
-  }
-
-  const { error: transactionError } = await supabase
-    .from('transactions')
-    .insert({
-      user_id: userId,
-      type,
-      amount,
-      description,
-      reference_id: referenceId ?? null,
-      status: 'completed'
-    });
-
-  if (transactionError) {
-    console.error(
-      'creditHive transaction insert error:',
-      transactionError
-    );
-  }
+export async function creditHive(userId: string, amount: number, type: Transaction['type'], description: string, referenceId?: string): Promise<void> {
+  const { data: user } = await supabase.from('users').select('hive_balance, total_earned').eq('id', userId).maybeSingle();
+  if (!user) return;
+  await supabase.from('users').update({ hive_balance: user.hive_balance + amount, total_earned: (user.total_earned || 0) + amount }).eq('id', userId);
+  await supabase.from('transactions').insert({ user_id: userId, type, amount, description, reference_id: referenceId ?? null, status: 'completed' });
 }
 
-export async function debitHive(
-  userId: string,
-  amount: number,
-  type: Transaction['type'],
-  description: string
-): Promise<boolean> {
-  // Validate amount
-  if (!Number.isFinite(amount) || amount <= 0) {
-    console.error('Invalid debit amount:', amount);
-    return false;
-  }
-
-  // Check account suspension
-  const guard = await checkNotSuspended(userId);
-
-  if (!guard.ok) {
-    console.error(
-      'Debit blocked:',
-      guard.message
-    );
-    return false;
-  }
-
-  // Get current balance
-  const { data: user, error: userError } = await supabase
-    .from('users')
-    .select('hive_balance')
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (userError) {
-    console.error(
-      'debitHive user lookup error:',
-      userError
-    );
-    return false;
-  }
-
-  if (!user) {
-    console.error(
-      'debitHive: User not found:',
-      userId
-    );
-    return false;
-  }
-
-  const currentBalance = Number(
-    user.hive_balance ?? 0
-  );
-
-  // Validate current balance
-  if (!Number.isFinite(currentBalance)) {
-    console.error(
-      'debitHive: Invalid current balance:',
-      currentBalance
-    );
-    return false;
-  }
-
-  // Check sufficient balance
-  if (currentBalance < amount) {
-    console.error(
-      `debitHive: Insufficient balance. Current: ${currentBalance}, Required: ${amount}`
-    );
-    return false;
-  }
-
-  const newBalance =
-    currentBalance - amount;
-
-  // Safety check
-  if (
-    !Number.isFinite(newBalance) ||
-    newBalance < 0
-  ) {
-    console.error(
-      'debitHive: Invalid new balance:',
-      newBalance
-    );
-    return false;
-  }
-
-  // Deduct balance
-  const { error: updateError } = await supabase
-    .from('users')
-    .update({
-      hive_balance: newBalance,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', userId);
-
-  if (updateError) {
-    console.error(
-      'debitHive balance update error:',
-      updateError
-    );
-    return false;
-  }
-
-  // Record transaction
-  const { error: transactionError } =
-    await supabase
-      .from('transactions')
-      .insert({
-        user_id: userId,
-        type,
-        amount: -amount,
-        description,
-        status: 'completed'
-      });
-
-  // If transaction recording failed,
-  // restore the deducted balance.
-  if (transactionError) {
-    console.error(
-      'debitHive transaction error:',
-      transactionError
-    );
-
-    const { error: rollbackError } =
-      await supabase
-        .from('users')
-        .update({
-          hive_balance: currentBalance,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', userId);
-
-    if (rollbackError) {
-      console.error(
-        'debitHive rollback error:',
-        rollbackError
-      );
-    }
-
-    return false;
-  }
-
+export async function debitHive(userId: string, amount: number, type: Transaction['type'], description: string): Promise<boolean> {
+  const { data: user } = await supabase.from('users').select('hive_balance').eq('id', userId).maybeSingle();
+  if (!user || user.hive_balance < amount) return false;
+  await supabase.from('users').update({ hive_balance: user.hive_balance - amount }).eq('id', userId);
+  await supabase.from('transactions').insert({ user_id: userId, type, amount: -amount, description, status: 'completed' });
   return true;
-  }
+}
 
 // Credit referral hive to unclaimed pool (NOT main balance)
 async function creditReferralHive(userId: string, amount: number, description: string): Promise<void> {
@@ -647,132 +295,18 @@ async function creditReferralHive(userId: string, amount: number, description: s
 }
 
 // Claim all unclaimed referral rewards
-export async function claimReferralRewards(
-  userId: string
-): Promise<{ success: boolean; hive: number; message: string }> {
-  if (!userId) {
-    return {
-      success: false,
-      hive: 0,
-      message: 'User not found'
-    };
-  }
-
+export async function claimReferralRewards(userId: string): Promise<{ success: boolean; hive: number; message: string }> {
   const guard = await checkNotSuspended(userId);
-
-  if (!guard.ok) {
-    return {
-      success: false,
-      hive: 0,
-      message: guard.message
-    };
+  if (!guard.ok) return { success: false, hive: 0, message: guard.message };
+  const { data: user } = await supabase.from('users').select('unclaimed_referral_hive, hive_balance').eq('id', userId).maybeSingle();
+  if (!user || !user.unclaimed_referral_hive || user.unclaimed_referral_hive <= 0) {
+    return { success: false, hive: 0, message: 'No referral rewards to claim' };
   }
-
-  // Use the original user fields for compatibility.
-  const { data: user, error: userError } = await supabase
-    .from('users')
-    .select('unclaimed_referral_hive, hive_balance')
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (userError) {
-    console.error('Referral user lookup failed:', userError);
-
-    return {
-      success: false,
-      hive: 0,
-      message: 'Unable to load your account.'
-    };
-  }
-
-  if (!user) {
-    return {
-      success: false,
-      hive: 0,
-      message: 'User not found'
-    };
-  }
-
-  const pending = Number(user.unclaimed_referral_hive ?? 0);
-
-  if (!Number.isFinite(pending) || pending <= 0) {
-    return {
-      success: false,
-      hive: 0,
-      message: 'No referral rewards to claim'
-    };
-  }
-
-  const amount = Math.floor(pending * 100) / 100;
-
-  if (!Number.isFinite(amount) || amount <= 0) {
-    await autoSuspendUser(
-      userId,
-      'Invalid referral reward amount detected'
-    );
-
-    return {
-      success: false,
-      hive: 0,
-      message: '🚫 Security violation detected.'
-    };
-  }
-
-  try {
-    // Credit main balance first.
-    await creditHive(
-      userId,
-      amount,
-      'referral',
-      'Referral rewards claimed'
-    );
-
-    // Clear referral pool only after successful credit.
-    const { error: clearError } = await supabase
-      .from('users')
-      .update({
-        unclaimed_referral_hive: 0,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', userId);
-
-    if (clearError) {
-      console.error(
-        'Referral pool clear failed:',
-        clearError
-      );
-
-      return {
-        success: false,
-        hive: 0,
-        message: 'Reward was credited but referral status could not be updated. Please contact admin.'
-      };
-    }
-
-    await createNotification(
-      userId,
-      'referral',
-      '🍯 Referral Rewards Claimed!',
-      `You claimed ${amount} coins from referral rewards!`
-    );
-
-    return {
-      success: true,
-      hive: amount,
-      message: `+${amount} coins claimed!`
-    };
-  } catch (error) {
-    console.error('Referral claim error:', error);
-
-    return {
-      success: false,
-      hive: 0,
-      message:
-        error instanceof Error
-          ? error.message
-          : 'Unable to claim referral rewards'
-    };
-  }
+  const amount = Math.floor(user.unclaimed_referral_hive * 100) / 100;
+  await supabase.from('users').update({ hive_balance: user.hive_balance + amount, unclaimed_referral_hive: 0 }).eq('id', userId);
+  await supabase.from('transactions').insert({ user_id: userId, type: 'referral', amount, description: 'Referral rewards claimed', status: 'completed' });
+  await createNotification(userId, 'referral', 'Referral Rewards Claimed!', `You claimed ${amount} coins from referral rewards!`);
+  return { success: true, hive: amount, message: `+${amount} coins claimed!` };
 }
 
 // ─── Daily Bonus ─────────────────────────────────────────────────────────────
@@ -808,125 +342,30 @@ export async function claimDailyBonus(userId: string): Promise<{ success: boolea
 
 // ─── Reward Codes ─────────────────────────────────────────────────────────────
 
-export async function claimRewardCode(
-  userId: string,
-  code: string
-): Promise<{
-  success: boolean;
-  hive: number;
-  message: string;
-}> {
-  try {
-    if (!userId) {
-      return {
-        success: false,
-        hive: 0,
-        message: 'Unable to verify account.'
-      };
-    }
+export async function claimRewardCode(userId: string, code: string): Promise<{ success: boolean; hive: number; message: string }> {
+  const guard = await checkNotSuspended(userId);
+  if (!guard.ok) return { success: false, hive: 0, message: guard.message };
 
-    const cleanCode = code.trim().toUpperCase();
+  const { data: rc } = await supabase.from('reward_codes').select('*').eq('code', code.toUpperCase()).maybeSingle();
+  if (!rc) return { success: false, hive: 0, message: 'Invalid reward code' };
+  if (!rc.is_active) return { success: false, hive: 0, message: 'This code is no longer active' };
+  if (rc.expires_at && new Date(rc.expires_at) < new Date()) return { success: false, hive: 0, message: 'Code has expired' };
+  if (rc.usage_limit !== null && rc.usage_count >= rc.usage_limit) return { success: false, hive: 0, message: 'Code usage limit reached' };
 
-    if (!cleanCode) {
-      return {
-        success: false,
-        hive: 0,
-        message: 'Please enter a reward code.'
-      };
-    }
+  const { data: existing } = await supabase.from('reward_code_claims').select('id').eq('user_id', userId).eq('reward_code_id', rc.id).maybeSingle();
+  if (existing) return { success: false, hive: 0, message: 'You already claimed this code' };
 
-    const { data, error } = await supabase.rpc('claim_reward_code', {
-      p_user_id: userId,
-      p_code: cleanCode
-    });
+  await supabase.from('reward_code_claims').insert({ user_id: userId, reward_code_id: rc.id, hive_earned: rc.reward_amount });
+  await supabase.from('reward_codes').update({ usage_count: rc.usage_count + 1 }).eq('id', rc.id);
+  await creditHive(userId, rc.reward_amount, 'reward_code', `⚡ Reward code: ${code.toUpperCase()}`);
+  await createNotification(userId, 'reward_code', '⚡ Reward Code Claimed!', `You earned ${rc.reward_amount} 🍯 Hive!`);
 
-    if (error) {
-      console.error('Reward code claim RPC error:', error);
-
-      return {
-        success: false,
-        hive: 0,
-        message: 'Unable to process reward code. Please try again.'
-      };
-    }
-
-    const result = data as {
-      success?: boolean;
-      hive?: number;
-      message?: string;
-    } | null;
-
-    if (!result || result.success !== true) {
-      return {
-        success: false,
-        hive: 0,
-        message: result?.message ?? 'Unable to claim reward code.'
-      };
-    }
-
-    const reward = Number(result.hive ?? 0);
-
-    if (!Number.isFinite(reward) || reward <= 0) {
-      return {
-        success: false,
-        hive: 0,
-        message: 'Invalid reward amount.'
-      };
-    }
-
-    // Notification is intentionally kept outside the balance transaction.
-    // If notification fails, the reward itself remains safely claimed.
-    try {
-      await createNotification(
-        userId,
-        'reward_code',
-        '⚡ Reward Code Claimed!',
-        `You earned ${reward} 🍯 Hive!`
-      );
-    } catch (notificationError) {
-      console.error(
-        'Reward code notification failed:',
-        notificationError
-      );
-    }
-
-    try {
-      const { data: user } = await supabase
-        .from('users')
-        .select('telegram_id')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (user?.telegram_id) {
-        await sendBotMessage(
-          user.telegram_id,
-          `⚡ <b>Reward Code Claimed!</b>\n\n` +
-          `Code: <code>${cleanCode}</code>\n` +
-          `+${reward} 🍯 <b>Hive</b> added to your balance!`
-        );
-      }
-    } catch (botError) {
-      console.error(
-        'Reward code Telegram notification failed:',
-        botError
-      );
-    }
-
-    return {
-      success: true,
-      hive: reward,
-      message: result.message ?? `+${reward} Hive earned!`
-    };
-
-  } catch (error) {
-    console.error('Reward code claim failed:', error);
-
-    return {
-      success: false,
-      hive: 0,
-      message: 'Unable to process reward code. Please try again.'
-    };
+  const { data: user } = await supabase.from('users').select('telegram_id').eq('id', userId).maybeSingle();
+  if (user) {
+    await sendBotMessage(user.telegram_id, `⚡ <b>Reward Code Claimed!</b>\n\nCode: <code>${code.toUpperCase()}</code>\n+${rc.reward_amount} 🍯 <b>Hive</b> added to your balance!`);
   }
+
+  return { success: true, hive: rc.reward_amount, message: `+${rc.reward_amount} Hive earned!` };
 }
 
 // ─── Ads ─────────────────────────────────────────────────────────────────────
@@ -953,146 +392,31 @@ export async function getTotalTodayAdCount(userId: string): Promise<number> {
   return count ?? 0;
 }
 
-export async function recordAdWatch(
-  userId: string,
-  providerId: string,
-  hiveEarned: number
-): Promise<{ success: boolean; message: string }> {
+export async function recordAdWatch(userId: string, providerId: string, hiveEarned: number): Promise<{ success: boolean; message: string }> {
   const guard = await checkNotSuspended(userId);
+  if (!guard.ok) return { success: false, message: guard.message };
 
-  if (!guard.ok) {
-    return {
-      success: false,
-      message: guard.message
-    };
-  }
+  const { data: provider } = await supabase.from('ad_providers').select('*').eq('id', providerId).maybeSingle();
+  if (!provider) return { success: false, message: 'Provider not found' };
 
-  const { data: provider } = await supabase
-    .from('ad_providers')
-    .select('*')
-    .eq('id', providerId)
-    .maybeSingle();
+  const todayCount = await getTodayAdCount(userId, providerId);
+  if (todayCount >= provider.daily_limit) return { success: false, message: `Daily limit of ${provider.daily_limit} ads reached` };
 
-  if (!provider) {
-    return {
-      success: false,
-      message: 'Provider not found'
-    };
-  }
+  await supabase.from('ad_watches').insert({ user_id: userId, provider_id: providerId, hive_earned: hiveEarned, completed: true });
+  await creditHive(userId, hiveEarned, 'ad', `📺 Ad watched - ${provider.name}`);
 
-  const serverReward = Number(provider.reward_per_ad);
-  const clientReward = Number(hiveEarned);
-
-  // Client is NEVER trusted for reward amount
-  if (
-    !Number.isFinite(clientReward) ||
-    !Number.isFinite(serverReward) ||
-    clientReward !== serverReward
-  ) {
-    await autoSuspendUser(
-      userId,
-      `Ad reward manipulation detected. Provider reward: ${serverReward}, submitted reward: ${clientReward}`
-    );
-
-    return {
-      success: false,
-      message: '🚫 Reward manipulation detected. Account permanently banned.'
-    };
-  }
-
-  if (serverReward <= 0) {
-    return {
-      success: false,
-      message: 'Invalid provider reward'
-    };
-  }
-
-  const todayCount = await getTodayAdCount(
-    userId,
-    providerId
-  );
-
-  if (todayCount >= provider.daily_limit) {
-    await autoSuspendUser(
-      userId,
-      `Ad daily limit violation. Limit: ${provider.daily_limit}, current count: ${todayCount}`
-    );
-
-    return {
-      success: false,
-      message: '🚫 Daily ad limit violation. Account permanently banned.'
-    };
-  }
-
-  const { error: watchError } = await supabase
-    .from('ad_watches')
-    .insert({
-      user_id: userId,
-      provider_id: providerId,
-      hive_earned: serverReward,
-      completed: true
-    });
-
-  if (watchError) {
-    return {
-      success: false,
-      message: watchError.message
-    };
-  }
-
-  try {
-    await creditHive(
-      userId,
-      serverReward,
-      'ad',
-      `📺 Ad watched - ${provider.name}`
-    );
-  } catch (error) {
-    console.error('Ad reward credit error:', error);
-
-    return {
-      success: false,
-      message: 'Unable to credit ad reward'
-    };
-  }
-
-  // 5% referral commission
-  const { data: referral } = await supabase
-    .from('referrals')
-    .select('referrer_id, status')
-    .eq('referred_id', userId)
-    .maybeSingle();
-
-  if (
-    referral &&
-    referral.status !== 'fake' &&
-    referral.status !== 'blocked'
-  ) {
-    const commission =
-      Math.round(serverReward * 0.05 * 100) / 100;
-
+  // 5% referral commission → unclaimed referral pool
+  const { data: referral } = await supabase.from('referrals').select('referrer_id, status').eq('referred_id', userId).maybeSingle();
+  if (referral && referral.status !== 'fake' && referral.status !== 'blocked') {
+    const commission = Math.round(hiveEarned * 0.05 * 100) / 100;
     if (commission > 0) {
-      await creditReferralHive(
-        referral.referrer_id,
-        commission,
-        `🍯 5% commission from referral's ad`
-      );
-
-      await createNotification(
-        referral.referrer_id,
-        'commission',
-        '🍯 5% Commission!',
-        `Your referral watched an ad. You earned ${commission} 🍯 Hive commission! (Claim from Refer tab)`
-      );
+      await creditReferralHive(referral.referrer_id, commission, `🍯 5% commission from referral's ad`);
+      await createNotification(referral.referrer_id, 'commission', '🍯 5% Commission!', `Your referral watched an ad. You earned ${commission} 🍯 Hive commission! (Claim from Refer tab)`);
     }
   }
 
   await checkReferralAdMilestones(userId);
-
-  return {
-    success: true,
-    message: `+${serverReward} Hive earned!`
-  };
+  return { success: true, message: `+${hiveEarned} Hive earned!` };
 }
 
 async function checkReferralAdMilestones(userId: string): Promise<void> {
@@ -1162,105 +486,16 @@ export async function getTodayWebsiteVisits(userId: string): Promise<string[]> {
   return (data ?? []).map(v => v.website_id);
 }
 
-export async function recordWebsiteVisit(
-  userId: string,
-  websiteId: string,
-  hiveReward: number
-): Promise<{ success: boolean; message: string }> {
+export async function recordWebsiteVisit(userId: string, websiteId: string, hiveReward: number): Promise<{ success: boolean; message: string }> {
   const guard = await checkNotSuspended(userId);
+  if (!guard.ok) return { success: false, message: guard.message };
 
-  if (!guard.ok) {
-    return {
-      success: false,
-      message: guard.message
-    };
-  }
+  const alreadyVisited = await getTodayWebsiteVisit(userId, websiteId);
+  if (alreadyVisited) return { success: false, message: 'Already visited today' };
 
-  const { data: website } = await supabase
-    .from('visit_websites')
-    .select('*')
-    .eq('id', websiteId)
-    .maybeSingle();
-
-  if (!website) {
-    return {
-      success: false,
-      message: 'Website not found'
-    };
-  }
-
-  const serverReward = Number(website.reward_hive);
-  const clientReward = Number(hiveReward);
-
-  // Never trust reward sent from client
-  if (
-    !Number.isFinite(clientReward) ||
-    !Number.isFinite(serverReward) ||
-    clientReward !== serverReward
-  ) {
-    await autoSuspendUser(
-      userId,
-      `Website reward manipulation detected. Server reward: ${serverReward}, submitted reward: ${clientReward}`
-    );
-
-    return {
-      success: false,
-      message: '🚫 Reward manipulation detected. Account permanently banned.'
-    };
-  }
-
-  const alreadyVisited = await getTodayWebsiteVisit(
-    userId,
-    websiteId
-  );
-
-  if (alreadyVisited) {
-    await autoSuspendUser(
-      userId,
-      `Duplicate website reward attempt: ${websiteId}`
-    );
-
-    return {
-      success: false,
-      message: '🚫 Duplicate reward attempt detected.'
-    };
-  }
-
-  const { error } = await supabase
-    .from('website_visits')
-    .insert({
-      user_id: userId,
-      website_id: websiteId,
-      hive_earned: serverReward
-    });
-
-  if (error) {
-    return {
-      success: false,
-      message: error.message
-    };
-  }
-
-  try {
-    await creditHive(
-      userId,
-      serverReward,
-      'ad',
-      `🌐 Website visit reward`
-    );
-  } catch (error) {
-    console.error('Website reward error:', error);
-
-    return {
-      success: false,
-      message: 'Unable to credit website reward'
-    };
-  }
-
-  return {
-    success: true,
-    message: `+${serverReward} Hive earned!`
-  };
+  await supabase.from('website_visits').insert({ user_id: userId, website_id: websiteId, hive_earned: hiveReward });
+  await creditHive(userId, hiveReward, 'ad', `🌐 Website visit reward`);
+  return { success: true, message: `+${hiveReward} Hive earned!` };
 }
 
 // Admin CRUD for visit_websites
@@ -1311,593 +546,94 @@ export async function startMining(userId: string): Promise<{ success: boolean; m
   return { success: true, message: 'Mining started!', startedAt: now };
 }
 
-// ─── Mining (Hourly Hive) ─────────────────────────────────────────────────────
-
-const MINING_COINS_PER_SESSION = 100;
-const MINING_MAX_DAILY_CLAIMS = 10;
-
-async function getMiningRate(): Promise<number> {
-  const settings = await getAppSettings();
-
-  return (
-    parseInt(
-      settings['mining_rate_per_hour'] ?? '100',
-      10
-    ) || MINING_COINS_PER_SESSION
-  );
-}
-
-export async function startMining(
-  userId: string
-): Promise<{
-  success: boolean;
-  message: string;
-  startedAt: string | null;
-}> {
+export async function claimMining(userId: string): Promise<{ success: boolean; hive: number; message: string; miningStartedAt: string | null; dailyClaimsRemaining: number }> {
   const guard = await checkNotSuspended(userId);
+  if (!guard.ok) return { success: false, hive: 0, message: guard.message, miningStartedAt: null, dailyClaimsRemaining: 0 };
 
-  if (!guard.ok) {
-    return {
-      success: false,
-      message: guard.message,
-      startedAt: null
-    };
+  const { data: user } = await supabase.from('users').select('mining_started_at, hive_balance, mining_daily_claims, mining_last_claim_date').eq('id', userId).maybeSingle();
+  if (!user || !user.mining_started_at) {
+    return { success: false, hive: 0, message: 'Mining not started', miningStartedAt: null, dailyClaimsRemaining: 0 };
   }
 
-  const {
-    data: user,
-    error
-  } = await supabase
-    .from('users')
-    .select(
-      'mining_started_at, mining_daily_claims, mining_last_claim_date'
-    )
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (error) {
-    console.error(
-      'Mining start user lookup error:',
-      error
-    );
-
-    return {
-      success: false,
-      message: 'Unable to load mining account',
-      startedAt: null
-    };
-  }
-
-  if (!user) {
-    return {
-      success: false,
-      message: 'User not found',
-      startedAt: null
-    };
-  }
-
-  if (user.mining_started_at) {
-    return {
-      success: false,
-      message: 'Mining already active',
-      startedAt: user.mining_started_at
-    };
-  }
-
-  const today = new Date()
-    .toISOString()
-    .slice(0, 10);
-
-  const lastClaimDate =
-    user.mining_last_claim_date
-      ? new Date(
-          user.mining_last_claim_date
-        )
-          .toISOString()
-          .slice(0, 10)
-      : null;
-
-  const dailyClaims =
-    lastClaimDate === today
-      ? Number(
-          user.mining_daily_claims ?? 0
-        )
-      : 0;
-
-  if (
-    dailyClaims >=
-    MINING_MAX_DAILY_CLAIMS
-  ) {
-    return {
-      success: false,
-      message:
-        `Daily mining limit reached (${MINING_MAX_DAILY_CLAIMS} claims/day). Come back tomorrow!`,
-      startedAt: null
-    };
-  }
-
-  const now =
-    new Date().toISOString();
-
-  const {
-    error: updateError
-  } = await supabase
-    .from('users')
-    .update({
-      mining_started_at: now,
-      mining_notified: false
-    })
-    .eq('id', userId);
-
-  if (updateError) {
-    console.error(
-      'Mining start update error:',
-      updateError
-    );
-
-    return {
-      success: false,
-      message: 'Unable to start mining',
-      startedAt: null
-    };
-  }
-
-  return {
-    success: true,
-    message: 'Mining started!',
-    startedAt: now
-  };
-}
-
-export async function claimMining(
-  userId: string
-): Promise<{
-  success: boolean;
-  hive: number;
-  message: string;
-  miningStartedAt: string | null;
-  dailyClaimsRemaining: number;
-}> {
-  const guard =
-    await checkNotSuspended(userId);
-
-  if (!guard.ok) {
-    return {
-      success: false,
-      hive: 0,
-      message: guard.message,
-      miningStartedAt: null,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  const {
-    data: user,
-    error: userError
-  } = await supabase
-    .from('users')
-    .select(
-      'mining_started_at, mining_daily_claims, mining_last_claim_date'
-    )
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (userError) {
-    console.error(
-      'Mining user lookup failed:',
-      userError
-    );
-
-    return {
-      success: false,
-      hive: 0,
-      message:
-        'Unable to load mining account',
-      miningStartedAt: null,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  if (!user) {
-    return {
-      success: false,
-      hive: 0,
-      message: 'User not found',
-      miningStartedAt: null,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  if (!user.mining_started_at) {
-    return {
-      success: false,
-      hive: 0,
-      message: 'Mining not started',
-      miningStartedAt: null,
-      dailyClaimsRemaining: 0
-    };
-  }
-
-  const elapsedMs =
-    Date.now() -
-    new Date(
-      user.mining_started_at
-    ).getTime();
-
-  const elapsedHours =
-    elapsedMs /
-    (1000 * 60 * 60);
+  const elapsedMs = Date.now() - new Date(user.mining_started_at).getTime();
+  const elapsedHours = elapsedMs / (1000 * 60 * 60);
 
   if (elapsedHours < 1) {
-    const minsLeft = Math.ceil(
-      60 -
-      elapsedMs /
-        (1000 * 60)
-    );
-
-    return {
-      success: false,
-      hive: 0,
-      message:
-        `Only ${minsLeft} minutes elapsed. Need at least 1 hour to claim.`,
-      miningStartedAt:
-        user.mining_started_at,
-      dailyClaimsRemaining:
-        Math.max(
-          0,
-          MINING_MAX_DAILY_CLAIMS -
-            Number(
-              user.mining_daily_claims ?? 0
-            )
-        )
-    };
+    const minsLeft = Math.ceil(60 - (elapsedMs / (1000 * 60)));
+    return { success: false, hive: 0, message: `Only ${minsLeft} minutes elapsed. Need at least 1 hour to claim.`, miningStartedAt: user.mining_started_at, dailyClaimsRemaining: 0 };
   }
 
-  const today =
-    new Date()
-      .toISOString()
-      .slice(0, 10);
-
-  const lastClaimDate =
-    user.mining_last_claim_date
-      ? new Date(
-          user.mining_last_claim_date
-        )
-          .toISOString()
-          .slice(0, 10)
-      : null;
-
-  const currentDailyClaims =
-    lastClaimDate === today
-      ? Number(
-          user.mining_daily_claims ?? 0
-        )
-      : 0;
-
-  if (
-    currentDailyClaims >=
-    MINING_MAX_DAILY_CLAIMS
-  ) {
-    return {
-      success: false,
-      hive: 0,
-      message:
-        `Daily mining limit reached (${MINING_MAX_DAILY_CLAIMS} claims/day). Come back tomorrow!`,
-      miningStartedAt:
-        user.mining_started_at,
-      dailyClaimsRemaining: 0
-    };
+  // Check and update daily claim limit
+  const today = new Date().toISOString().slice(0, 10);
+  const lastClaimDate = user.mining_last_claim_date ? new Date(user.mining_last_claim_date).toISOString().slice(0, 10) : null;
+  const currentDailyClaims = (lastClaimDate === today) ? (user.mining_daily_claims ?? 0) : 0;
+  if (currentDailyClaims >= MINING_MAX_DAILY_CLAIMS) {
+    return { success: false, hive: 0, message: `Daily mining limit reached (${MINING_MAX_DAILY_CLAIMS} claims/day). Come back tomorrow!`, miningStartedAt: user.mining_started_at, dailyClaimsRemaining: 0 };
   }
 
-  const rate =
-    Number(
-      await getMiningRate()
-    );
+  const rate = await getMiningRate();
+  const hiveEarned = rate; // Fixed per session (100 coins)
+  const newDailyClaims = currentDailyClaims + 1;
 
-  if (
-    !Number.isFinite(rate) ||
-    rate <= 0
-  ) {
-    await autoSuspendUser(
-      userId,
-      'Invalid mining reward rate detected'
-    );
+  await supabase.from('users').update({
+    hive_balance: user.hive_balance + hiveEarned,
+    total_earned: ((user as { total_earned?: number }).total_earned ?? 0) + hiveEarned,
+    mining_started_at: null,
+    mining_daily_claims: newDailyClaims,
+    mining_last_claim_date: today,
+  }).eq('id', userId);
 
-    return {
-      success: false,
-      hive: 0,
-      message:
-        'Security error detected',
-      miningStartedAt: null,
-      dailyClaimsRemaining: 0
-    };
+  await supabase.from('transactions').insert({
+    user_id: userId,
+    type: 'reward',
+    amount: hiveEarned,
+    description: `⛏️ Mining reward — 1 session × ${rate} coins`,
+    status: 'completed',
+  });
+
+  await createNotification(userId, 'reward', '⛏️ Mining Reward Claimed!', `You earned ${hiveEarned} coins from mining! (${MINING_MAX_DAILY_CLAIMS - newDailyClaims} claims left today)`);
+
+  const { data: userRecord } = await supabase.from('users').select('telegram_id, first_name').eq('id', userId).maybeSingle();
+  if (userRecord) {
+    await sendBotMessage(userRecord.telegram_id, `⛏️ <b>Mining Reward Claimed!</b>\n\n${userRecord.first_name}, you earned <b>${hiveEarned} coins</b> from mining!\n\n⏱️ Mined for: 1 hour\n💰 Rate: ${rate} coins/session\n📊 Claims left today: ${MINING_MAX_DAILY_CLAIMS - newDailyClaims}\n\nKeep mining to earn more! 🚀`);
   }
 
-  const hiveEarned = rate;
-
-  const newDailyClaims =
-    currentDailyClaims + 1;
-
-  /*
-   * Credit reward first.
-   * Mining session is closed only
-   * after the reward is successfully credited.
-   */
-  try {
-    await creditHive(
-      userId,
-      hiveEarned,
-      'mining',
-      `⛏️ Mining reward - 1 session × ${rate} coins`
-    );
-  } catch (error) {
-    console.error(
-      'Mining credit error:',
-      error
-    );
-
-    return {
-      success: false,
-      hive: 0,
-      message:
-        'Unable to credit mining reward. Please try again.',
-      miningStartedAt:
-        user.mining_started_at,
-      dailyClaimsRemaining:
-        Math.max(
-          0,
-          MINING_MAX_DAILY_CLAIMS -
-            currentDailyClaims
-        )
-    };
-  }
-
-  const {
-    error: stateError
-  } = await supabase
-    .from('users')
-    .update({
-      mining_started_at: null,
-      mining_daily_claims:
-        newDailyClaims,
-      mining_last_claim_date:
-        today,
-      mining_notified: false,
-      updated_at:
-        new Date().toISOString()
-    })
-    .eq('id', userId);
-
-  if (stateError) {
-    console.error(
-      'Mining state update failed:',
-      stateError
-    );
-
-    return {
-      success: true,
-      hive: hiveEarned,
-      message:
-        `+${hiveEarned} coins mined!`,
-      miningStartedAt: null,
-      dailyClaimsRemaining:
-        Math.max(
-          0,
-          MINING_MAX_DAILY_CLAIMS -
-            newDailyClaims
-        )
-    };
-  }
-
-  await createNotification(
-    userId,
-    'reward',
-    '⛏️ Mining Reward Claimed!',
-    `You earned ${hiveEarned} coins from mining!`
-  );
-
-  try {
-    const {
-      data: userRecord
-    } = await supabase
-      .from('users')
-      .select(
-        'telegram_id, first_name'
-      )
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (userRecord) {
-      await sendBotMessage(
-        userRecord.telegram_id,
-        `⛏️ <b>Mining Reward Claimed!</b>\n\n` +
-        `${userRecord.first_name}, you earned <b>${hiveEarned} coins</b> from mining!\n\n` +
-        `⏱️ Mined for: 1 hour\n` +
-        `💰 Rate: ${rate} coins/session\n` +
-        `📊 Claims left today: ${
-          MINING_MAX_DAILY_CLAIMS -
-          newDailyClaims
-        }\n\n` +
-        `Keep mining to earn more! 🚀`
-      );
-    }
-  } catch (error) {
-    console.error(
-      'Mining Telegram notification failed:',
-      error
-    );
-  }
-
-  return {
-    success: true,
-    hive: hiveEarned,
-    message:
-      `+${hiveEarned} coins mined!`,
-    miningStartedAt: null,
-    dailyClaimsRemaining:
-      MINING_MAX_DAILY_CLAIMS -
-      newDailyClaims
-  };
+  return { success: true, hive: hiveEarned, message: `+${hiveEarned} coins mined!`, miningStartedAt: null, dailyClaimsRemaining: MINING_MAX_DAILY_CLAIMS - newDailyClaims };
 }
 
-export async function getMiningStatus(
-  userId: string
-): Promise<{
-  isMining: boolean;
-  startedAt: string | null;
-  elapsedHours: number;
-  pendingHive: number;
-  dailyClaims: number;
-  dailyClaimsRemaining: number;
-}> {
-  const {
-    data: user,
-    error
-  } = await supabase
-    .from('users')
-    .select(
-      'mining_started_at, mining_notified, mining_daily_claims, mining_last_claim_date'
-    )
-    .eq('id', userId)
-    .maybeSingle();
+export async function getMiningStatus(userId: string): Promise<{ isMining: boolean; startedAt: string | null; elapsedHours: number; pendingHive: number; dailyClaims: number; dailyClaimsRemaining: number }> {
+  const { data: user } = await supabase.from('users').select('mining_started_at, mining_notified, mining_daily_claims, mining_last_claim_date').eq('id', userId).maybeSingle();
+  
+  const today = new Date().toISOString().slice(0, 10);
+  const lastClaimDate = user?.mining_last_claim_date ? new Date(user.mining_last_claim_date).toISOString().slice(0, 10) : null;
+  const dailyClaims = (lastClaimDate === today) ? (user?.mining_daily_claims ?? 0) : 0;
+  const dailyClaimsRemaining = Math.max(0, MINING_MAX_DAILY_CLAIMS - dailyClaims);
+  const rate = await getMiningRate();
 
-  if (error) {
-    console.error(
-      'Mining status error:',
-      error
-    );
+  if (!user?.mining_started_at) return { isMining: false, startedAt: null, elapsedHours: 0, pendingHive: 0, dailyClaims, dailyClaimsRemaining };
 
-    return {
-      isMining: false,
-      startedAt: null,
-      elapsedHours: 0,
-      pendingHive: 0,
-      dailyClaims: 0,
-      dailyClaimsRemaining:
-        MINING_MAX_DAILY_CLAIMS
-    };
-  }
-
-  const today =
-    new Date()
-      .toISOString()
-      .slice(0, 10);
-
-  const lastClaimDate =
-    user?.mining_last_claim_date
-      ? new Date(
-          user.mining_last_claim_date
-        )
-          .toISOString()
-          .slice(0, 10)
-      : null;
-
-  const dailyClaims =
-    lastClaimDate === today
-      ? Number(
-          user?.mining_daily_claims ?? 0
-        )
-      : 0;
-
-  const dailyClaimsRemaining =
-    Math.max(
-      0,
-      MINING_MAX_DAILY_CLAIMS -
-        dailyClaims
-    );
-
-  const rate =
-    await getMiningRate();
-
-  if (!user?.mining_started_at) {
-    return {
-      isMining: false,
-      startedAt: null,
-      elapsedHours: 0,
-      pendingHive: 0,
-      dailyClaims,
-      dailyClaimsRemaining
-    };
-  }
-
-  const elapsedMs =
-    Date.now() -
-    new Date(
-      user.mining_started_at
-    ).getTime();
-
-  const elapsedHours =
-    elapsedMs /
-    (1000 * 60 * 60);
-
+  const elapsedMs = Date.now() - new Date(user.mining_started_at).getTime();
+  const elapsedHours = elapsedMs / (1000 * 60 * 60);
   const pendingHive = rate;
 
+  // Mining stops after 1 hour — user must claim and restart
   if (elapsedHours >= 1) {
     if (!user.mining_notified) {
-      try {
-        const {
-          data: telegramUser
-        } = await supabase
-          .from('users')
-          .select('telegram_id')
-          .eq('id', userId)
-          .maybeSingle();
-
-        if (telegramUser?.telegram_id) {
-          await sendBotMessage(
-            telegramUser.telegram_id,
-            `⛏️ <b>Mining Complete!</b>\n\n` +
-            `Your mining session has finished. ` +
-            `You earned <b>${rate} coins</b>!\n\n` +
-            `Open the app to claim your reward and start mining again. 🚀`
-          );
-        }
-      } catch (error) {
-        console.error(
-          'Mining completion notification error:',
-          error
-        );
+      const { data: u } = await supabase.from('users').select('telegram_id').eq('id', userId).maybeSingle();
+      if (u?.telegram_id) {
+        await sendBotMessage(u.telegram_id, `⛏️ <b>Mining Complete!</b>\n\nYour mining session has finished. You earned <b>${rate} coins</b>!\n\nOpen the app to claim your reward and start mining again. 🚀`);
       }
-
-      await createNotification(
-        userId,
-        'mining_ready',
-        '⛏️ Mining Complete!',
-        `Your mining has finished. Claim your ${rate} coins now!`
-      );
-
-      await supabase
-        .from('users')
-        .update({
-          mining_notified: true
-        })
-        .eq('id', userId);
+      await createNotification(userId, 'mining_ready', '⛏️ Mining Complete!', `Your mining has finished. Claim your ${rate} coins now!`);
+      await supabase.from('users').update({ mining_notified: true }).eq('id', userId);
     }
-
-    return {
-      isMining: false,
-      startedAt:
-        user.mining_started_at,
-      elapsedHours: 1,
-      pendingHive: rate,
-      dailyClaims,
-      dailyClaimsRemaining
-    };
+    return { isMining: false, startedAt: user.mining_started_at, elapsedHours: 1, pendingHive: rate, dailyClaims, dailyClaimsRemaining };
   }
 
-  return {
-    isMining: true,
-    startedAt:
-      user.mining_started_at,
-    elapsedHours,
-    pendingHive,
-    dailyClaims,
-    dailyClaimsRemaining
-  };
+  return { isMining: true, startedAt: user.mining_started_at, elapsedHours, pendingHive: rate, dailyClaims, dailyClaimsRemaining };
 }
 
 // ─── Tasks ───────────────────────────────────────────────────────────────────
-    
+
 export async function getTasks(category?: string): Promise<Task[]> {
   let query = supabase.from('tasks').select('*').eq('is_active', true).order('sort_order');
   if (category) query = query.eq('category', category);
@@ -2240,71 +976,11 @@ export async function suspendUser(adminId: string, userId: string, reason: strin
   if (user) await sendBotMessage(user.telegram_id, `🚫 <b>Account Suspended</b>\n\nYour Hive Earn account has been suspended.\n\n<b>Reason:</b> ${reason}\n\nContact the admin if you believe this is a mistake.`, false);
 }
 
-export async function unsuspendUser(
-  adminId: string,
-  userId: string
-): Promise<void> {
-  const { data: user } = await supabase
-    .from('users')
-    .select(`
-      telegram_id,
-      permanent_ban,
-      permanent_ban_reason
-    `)
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (!user) {
-    throw new Error('User not found');
-  }
-
-  // Permanent ban can NEVER be removed
-  if (user.permanent_ban) {
-    await supabase.from('admin_logs').insert({
-      admin_id: adminId,
-      action: 'blocked_permanent_unban_attempt',
-      target_type: 'user',
-      target_id: userId,
-      new_data: {
-        reason:
-          user.permanent_ban_reason ??
-          'Permanent fraud ban'
-      }
-    });
-
-    throw new Error(
-      'PERMANENT_BAN_CANNOT_BE_REMOVED'
-    );
-  }
-
-  const { error } = await supabase
-    .from('users')
-    .update({
-      is_suspended: false,
-      suspension_reason: null,
-      manually_unsuspended: true,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', userId)
-    .eq('permanent_ban', false);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  await supabase.from('admin_logs').insert({
-    admin_id: adminId,
-    action: 'unsuspend_user',
-    target_type: 'user',
-    target_id: userId
-  });
-
-  await sendBotMessage(
-    user.telegram_id,
-    `✅ <b>Account Unsuspended</b>\n\n` +
-    `Your Hive Earn account has been restored. ` +
-    `You can now earn Hive again!`
-  );
+export async function unsuspendUser(adminId: string, userId: string): Promise<void> {
+  await supabase.from('users').update({ is_suspended: false, suspension_reason: null, manually_unsuspended: true }).eq('id', userId);
+  await supabase.from('admin_logs').insert({ admin_id: adminId, action: 'unsuspend_user', target_type: 'user', target_id: userId });
+  const { data: user } = await supabase.from('users').select('telegram_id').eq('id', userId).maybeSingle();
+  if (user) await sendBotMessage(user.telegram_id, `✅ <b>Account Unsuspended</b>\n\nYour Hive Earn account has been restored. You can now earn Hive again!`);
 }
 
 export async function listUser(adminId: string, userId: string, reason: string): Promise<void> {
@@ -2336,477 +1012,74 @@ export async function getUserActivity(userId: string) {
     { data: rewardCodeClaims },
     { data: websiteVisits },
   ] = await Promise.all([
-    supabase
-      .from('users')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle(),
-
-    supabase
-      .from('transactions')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(1000),
-
-    supabase
-      .from('ad_watches')
-      .select('hive_earned', { count: 'exact' })
-      .eq('user_id', userId)
-      .eq('completed', true),
-
-    supabase
-      .from('withdrawals')
-      .select('*')
-      .eq('user_id', userId),
-
-    supabase
-      .from('task_completions')
-      .select('hive_earned')
-      .eq('user_id', userId)
-      .eq('status', 'verified'),
-
-    supabase
-      .from('referrals')
-      .select('*')
-      .eq('referrer_id', userId),
-
-    supabase
-      .from('daily_bonus_claims')
-      .select('hive_earned')
-      .eq('user_id', userId),
-
-    supabase
-      .from('reward_code_claims')
-      .select('hive_earned')
-      .eq('user_id', userId),
-
-    supabase
-      .from('website_visits')
-      .select('hive_earned')
-      .eq('user_id', userId),
+    supabase.from('users').select('*').eq('id', userId).maybeSingle(),
+    supabase.from('transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(50),
+    supabase.from('ad_watches').select('hive_earned', { count: 'exact' }).eq('user_id', userId).eq('completed', true),
+    supabase.from('withdrawals').select('*').eq('user_id', userId),
+    supabase.from('task_completions').select('hive_earned').eq('user_id', userId).eq('status', 'verified'),
+    supabase.from('referrals').select('*').eq('referrer_id', userId),
+    supabase.from('daily_bonus_claims').select('hive_earned').eq('user_id', userId),
+    supabase.from('reward_code_claims').select('hive_earned').eq('user_id', userId),
+    supabase.from('website_visits').select('hive_earned').eq('user_id', userId),
   ]);
 
-  // ─────────────────────────────────────────────────────────────
-  // 1. Earnings from activity tables
-  // ─────────────────────────────────────────────────────────────
+  // Calculate earnings from all sources
+  const adEarnings = (adWatches ?? []).reduce((sum: number, w) => sum + (w.hive_earned || 0), 0);
+  const taskEarnings = (taskCompletions ?? []).reduce((sum: number, t) => sum + (t.hive_earned || 0), 0);
+  const dailyBonusEarnings = (dailyClaims ?? []).reduce((sum: number, d) => sum + (d.hive_earned || 0), 0);
+  const rewardCodeEarnings = (rewardCodeClaims ?? []).reduce((sum: number, r) => sum + (r.hive_earned || 0), 0);
+  const websiteVisitEarnings = (websiteVisits ?? []).reduce((sum: number, v) => sum + (v.hive_earned || 0), 0);
 
-  const adEarnings = (adWatches ?? []).reduce(
-    (sum: number, w: any) => sum + (Number(w.hive_earned) || 0),
-    0
-  );
+  // Referral earnings (from unclaimed pool when claimed)
+  const referralEarnings = user?.unclaimed_referral_hive ?? 0;
 
-  const taskEarnings = (taskCompletions ?? []).reduce(
-    (sum: number, t: any) => sum + (Number(t.hive_earned) || 0),
-    0
-  );
+  // Total earned from all methods
+  const totalCalculatedEarnings = adEarnings + taskEarnings + dailyBonusEarnings + rewardCodeEarnings + websiteVisitEarnings;
 
-  const dailyBonusEarnings = (dailyClaims ?? []).reduce(
-    (sum: number, d: any) => sum + (Number(d.hive_earned) || 0),
-    0
-  );
+  // Withdrawals
+  const totalWithdrawnHive = (withdrawals ?? []).filter(w => w.status === 'approved').reduce((sum, w) => sum + w.hive_amount, 0);
 
-  const rewardCodeEarnings = (rewardCodeClaims ?? []).reduce(
-    (sum: number, r: any) => sum + (Number(r.hive_earned) || 0),
-    0
-  );
+  // Expected balance
+  const expectedBalance = totalCalculatedEarnings - totalWithdrawnHive;
+  const actualBalance = user?.hive_balance ?? 0;
 
-  const websiteVisitEarnings = (websiteVisits ?? []).reduce(
-    (sum: number, v: any) => sum + (Number(v.hive_earned) || 0),
-    0
-  );
-
-  // ─────────────────────────────────────────────────────────────
-  // 2. Earnings recorded in transactions
-  //
-  // Mining, game and claimed referral rewards are credited
-  // directly through the transaction system.
-  // ─────────────────────────────────────────────────────────────
-
-  const transactionRows = transactions ?? [];
-
-  const miningEarnings = transactionRows
-    .filter((t: any) => t.type === 'mining' && Number(t.amount) > 0)
-    .reduce(
-      (sum: number, t: any) => sum + (Number(t.amount) || 0),
-      0
-    );
-
-  const gameEarnings = transactionRows
-    .filter((t: any) => t.type === 'game' && Number(t.amount) > 0)
-    .reduce(
-      (sum: number, t: any) => sum + (Number(t.amount) || 0),
-      0
-    );
-
-  const referralTransactionEarnings = transactionRows
-    .filter((t: any) => t.type === 'referral' && Number(t.amount) > 0)
-    .reduce(
-      (sum: number, t: any) => sum + (Number(t.amount) || 0),
-      0
-    );
-
-  // Referral rewards still waiting in the unclaimed pool.
-  // This is NOT part of hive_balance yet.
-  const unclaimedReferralHive = Number(
-    user?.unclaimed_referral_hive ?? 0
-  ) || 0;
-
-  // ─────────────────────────────────────────────────────────────
-  // 3. Total earned
-  // ─────────────────────────────────────────────────────────────
-
-  const totalCalculatedEarnings =
-    adEarnings +
-    taskEarnings +
-    dailyBonusEarnings +
-    rewardCodeEarnings +
-    websiteVisitEarnings +
-    miningEarnings +
-    gameEarnings +
-    referralTransactionEarnings;
-
-  // ─────────────────────────────────────────────────────────────
-  // 4. Approved withdrawals
-  // ─────────────────────────────────────────────────────────────
-
-  const approvedWithdrawals = (withdrawals ?? []).filter(
-    (w: any) => w.status === 'approved'
-  );
-
-  const totalWithdrawnHive = approvedWithdrawals.reduce(
-    (sum: number, w: any) => sum + (Number(w.hive_amount) || 0),
-    0
-  );
-
-  const totalWithdrawnUsdt = approvedWithdrawals.reduce(
-    (sum: number, w: any) => sum + (Number(w.net_amount) || 0),
-    0
-  );
-
-  // ─────────────────────────────────────────────────────────────
-  // 5. Expected main balance
-  //
-  // IMPORTANT:
-  // Unclaimed referral rewards are excluded because they are
-  // still outside hive_balance.
-  // ─────────────────────────────────────────────────────────────
-
-  const expectedBalance =
-    totalCalculatedEarnings - totalWithdrawnHive;
-
-  const actualBalance =
-    Number(user?.hive_balance ?? 0) || 0;
-
-  const balanceDifference =
-    actualBalance - expectedBalance;
-
-  // Small tolerance for floating-point / rounding differences.
-  const balanceMismatch =
-    Math.abs(balanceDifference) > 2;
-
-  // ─────────────────────────────────────────────────────────────
-  // 6. Determine audit severity
-  //
-  // Mismatch itself does NOT automatically ban the user.
-  // It becomes evidence for further security checks.
-  // ─────────────────────────────────────────────────────────────
-
-  let auditSeverity:
-    | 'informational'
-    | 'warning'
-    | 'high'
-    | 'critical' = 'informational';
-
-  if (balanceMismatch) {
-    const absDifference = Math.abs(balanceDifference);
-
-    if (absDifference > 1000) {
-      auditSeverity = 'critical';
-    } else if (absDifference > 100) {
-      auditSeverity = 'high';
-    } else if (absDifference > 10) {
-      auditSeverity = 'warning';
-    } else {
-      auditSeverity = 'warning';
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // 7. Create audit evidence
-  //
-  // IMPORTANT:
-  // This does NOT ban the user.
-  // It only stores the mismatch evidence.
-  // ─────────────────────────────────────────────────────────────
-
-  if (balanceMismatch) {
-    try {
-      await supabase.from('balance_audit_logs').insert({
-        user_id: userId,
-
-        actual_balance: actualBalance,
-        expected_balance: expectedBalance,
-        balance_difference: balanceDifference,
-
-        severity: auditSeverity,
-
-        status: 'open',
-
-        evidence: {
-          source: 'admin_user_activity_audit',
-
-          earnings: {
-            ads: adEarnings,
-            tasks: taskEarnings,
-            daily_bonus: dailyBonusEarnings,
-            reward_codes: rewardCodeEarnings,
-            website_visits: websiteVisitEarnings,
-            mining: miningEarnings,
-            game: gameEarnings,
-            referral_claimed: referralTransactionEarnings,
-            referral_unclaimed: unclaimedReferralHive,
-          },
-
-          totals: {
-            calculated_earnings: totalCalculatedEarnings,
-            approved_withdrawals: totalWithdrawnHive,
-            expected_balance: expectedBalance,
-            actual_balance: actualBalance,
-            difference: balanceDifference,
-          },
-
-          activity_counts: {
-            ads: adWatches?.length ?? 0,
-            tasks: taskCompletions?.length ?? 0,
-            daily_bonus: dailyClaims?.length ?? 0,
-            reward_codes: rewardCodeClaims?.length ?? 0,
-            website_visits: websiteVisits?.length ?? 0,
-            referrals: referrals?.length ?? 0,
-            completed_referrals:
-              (referrals ?? []).filter(
-                (r: any) => r.status === 'completed'
-              ).length,
-            mining_transactions: transactionRows.filter(
-              (t: any) =>
-                t.type === 'mining' &&
-                Number(t.amount) > 0
-            ).length,
-            game_transactions: transactionRows.filter(
-              (t: any) =>
-                t.type === 'game' &&
-                Number(t.amount) > 0
-            ).length,
-            referral_transactions: transactionRows.filter(
-              (t: any) =>
-                t.type === 'referral' &&
-                Number(t.amount) > 0
-            ).length,
-          },
-
-          note:
-            'Balance mismatch detected. This record is audit evidence only and does not automatically ban the account.',
-        },
-      });
-    } catch (auditError) {
-      console.error(
-        'Failed to create balance audit log:',
-        auditError
-      );
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // 8. Return admin activity data
-  // ─────────────────────────────────────────────────────────────
+  // Allow small tolerance for rounding
+  const balanceMismatch = Math.abs(expectedBalance - actualBalance) > 2;
 
   return {
     user,
-
-    transactions: transactionRows,
-
+    transactions: transactions ?? [],
     totalAds: adWatches?.length ?? 0,
-
-    totalWithdrawals: withdrawals?.length ?? 0,
-
-    totalWithdrawnUsdt,
-
-    totalTasksCompleted:
-      taskCompletions?.length ?? 0,
-
-    totalReferrals:
-      referrals?.length ?? 0,
-
-    completedReferrals:
-      (referrals ?? []).filter(
-        (r: any) => r.status === 'completed'
-      ).length,
-
-    // Earnings breakdown
+    totalWithdrawals: (withdrawals ?? []).length,
+    totalWithdrawnUsdt: (withdrawals ?? []).filter(w => w.status === 'approved').reduce((sum, w) => sum + w.net_amount, 0),
+    totalTasksCompleted: (taskCompletions ?? []).length,
+    totalReferrals: (referrals ?? []).length,
+    completedReferrals: (referrals ?? []).filter(r => r.status === 'completed').length,
+    // Breakdown
     adEarnings,
     taskEarnings,
     dailyBonusEarnings,
     rewardCodeEarnings,
     websiteVisitEarnings,
-
-    miningEarnings,
-    gameEarnings,
-    referralEarnings: referralTransactionEarnings,
-
-    unclaimedReferralHive,
-
+    referralEarnings,
     totalCalculatedEarnings,
-
     totalWithdrawnHive,
-
     expectedBalance,
-
     actualBalance,
-
-    balanceDifference,
-
     balanceMismatch,
-
-    auditSeverity,
   };
 }
 
-// ─── Automatic Balance Fraud Audit ───────────────────────────────────────────
-
-export async function autoAuditUser(
-  adminId: string,
-  userId: string
-): Promise<{ suspicious: boolean; reason: string }> {
-  try {
-    const activity = await getUserActivity(userId);
-
-    // No suspicious balance difference
-    if (
-      !activity.balanceMismatch ||
-      activity.actualBalance <= activity.expectedBalance + 10
-    ) {
-      return {
-        suspicious: false,
-        reason: '',
-      };
-    }
-
-    const difference =
-      activity.actualBalance - activity.expectedBalance;
-
-    const reason =
-      `Balance manipulation detected. ` +
-      `Expected: ${activity.expectedBalance.toFixed(2)} H, ` +
-      `Actual: ${activity.actualBalance.toFixed(2)} H, ` +
-      `Difference: ${difference.toFixed(2)} H`;
-
-    // Check target account before taking action
-    const { data: targetUser, error: targetError } = await supabase
-      .from('users')
-      .select(
-        'id, telegram_id, first_name, username, is_admin, permanent_ban, security_lock'
-      )
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (targetError || !targetUser) {
-      throw new Error('Target user not found');
-    }
-
-    // Already permanently banned
-    if (targetUser.permanent_ban === true) {
-      return {
-        suspicious: true,
-        reason: 'Account is already permanently banned.',
-      };
-    }
-
-    // Never automatically ban an admin account
-    // This is an additional application-level safety check.
-    if (targetUser.is_admin === true) {
-      console.warn(
-        `Balance audit detected on admin account ${userId}. No automatic ban applied.`
-      );
-
-      await supabase.from('fraud_logs').insert({
-        user_id: userId,
-        type: 'balance_manipulation',
-        description:
-          `Balance mismatch detected on admin account. ${reason}`,
-        severity: 'critical',
-      });
-
-      return {
-        suspicious: true,
-        reason:
-          'Critical balance mismatch detected on an admin account. Automatic ban was blocked.',
-      };
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // PERMANENT FRAUD BAN
-    // The database RPC applies:
-    // is_suspended = true
-    // permanent_ban = true
-    // security_lock = true
-    // manually_unsuspended = false
-    // ─────────────────────────────────────────────────────────────
-
-    const { data: banned, error: banError } =
-      await supabase.rpc('permanent_ban_user', {
-        p_user_id: userId,
-        p_reason: reason,
-      });
-
-    if (banError || banned !== true) {
-      console.error(
-        'Automatic permanent fraud ban failed:',
-        banError
-      );
-
-      await supabase.from('fraud_logs').insert({
-        user_id: userId,
-        type: 'balance_manipulation',
-        description:
-          `CRITICAL: Balance manipulation detected but permanent ban failed. ${reason}`,
-        severity: 'critical',
-      });
-
-      return {
-        suspicious: true,
-        reason:
-          'Fraud detected, but permanent ban could not be applied.',
-      };
-    }
-
-    // Additional fraud log
-    await supabase.from('fraud_logs').insert({
-      user_id: userId,
-      type: 'balance_manipulation',
-      description:
-        `PERMANENT BAN: ${reason}`,
-      severity: 'critical',
-    });
-
-    console.log(
-      `Permanent fraud ban applied to ${userId}: ${reason}`
-    );
-
-    return {
-      suspicious: true,
-      reason,
-    };
-  } catch (error) {
-    console.error(
-      'Automatic balance audit failed:',
-      error
-    );
-
-    return {
-      suspicious: false,
-      reason: '',
-    };
+// Auto-audit user: suspend if balance doesn't match activity
+export async function autoAuditUser(adminId: string, userId: string): Promise<{ suspicious: boolean; reason: string }> {
+  const activity = await getUserActivity(userId);
+  if (activity.balanceMismatch && activity.actualBalance > activity.expectedBalance + 10) {
+    const reason = `Balance mismatch: expected ${activity.expectedBalance.toFixed(2)}H, actual ${activity.actualBalance.toFixed(2)}H`;
+    await suspendUser(adminId, userId, reason);
+    await supabase.from('fraud_logs').insert({ user_id: userId, type: 'balance_manipulation', description: reason, severity: 'critical' });
+    return { suspicious: true, reason };
   }
+  return { suspicious: false, reason: '' };
 }
 
 export async function approveWithdrawal(adminId: string, withdrawalId: string, txid: string): Promise<void> {
@@ -3445,90 +1718,28 @@ export async function getGameStatus(userId: string): Promise<{ canPlay: boolean;
   return { canPlay: hoursLeft === 0, hoursLeft, lastPlayedAt: lastGame.created_at, totalGames: count ?? 0 };
 }
 
-export async function recordGameReward(
-  userId: string,
-  score: number,
-  hiveEarned: number
-): Promise<{ success: boolean; message: string }> {
+export async function recordGameReward(userId: string, score: number, hiveEarned: number): Promise<{ success: boolean; message: string }> {
   const guard = await checkNotSuspended(userId);
+  if (!guard.ok) return { success: false, message: guard.message };
 
-  if (!guard.ok) {
-    return {
-      success: false,
-      message: guard.message
-    };
-  }
-
-  if (!Number.isFinite(score) || score < 0) {
-    await autoSuspendUser(
-      userId,
-      `Invalid game score detected: ${String(score)}`
-    );
-
-    return {
-      success: false,
-      message: '🚫 Invalid game activity detected.'
-    };
-  }
-
-  // The reward is generated SERVER-SIDE.
-  // Never trust the reward supplied by the client.
-  const clientReward = Number(hiveEarned);
-
+  // Check 2h cooldown
   const status = await getGameStatus(userId);
+  if (!status.canPlay) return { success: false, message: `Come back in ${status.hoursLeft}h to play again` };
 
-  if (!status.canPlay) {
-    return {
-      success: false,
-      message: `Come back in ${status.hoursLeft}h to play again`
-    };
-  }
+  // Random reward between 5-20 Hive
+  const reward = Math.floor(Math.random() * 16) + 5; // 5-20 inclusive
 
-  const reward =
-    Math.floor(Math.random() * 16) + 5;
+  await supabase.from('transactions').insert({
+    user_id: userId,
+    type: 'game',
+    amount: reward,
+    description: `🎮 Mini Game — Score: ${score}`,
+    status: 'completed',
+  });
+  await creditHive(userId, reward, 'game', `🎮 Mini Game reward (Score: ${score})`);
+  await createNotification(userId, 'reward', '🎮 Game Reward!', `You earned ${reward} 🍯 Hive from the mini game!`);
 
-  if (
-    !Number.isFinite(clientReward) ||
-    clientReward !== reward
-  ) {
-    await autoSuspendUser(
-      userId,
-      `Game reward manipulation detected. Submitted: ${clientReward}, server calculated: ${reward}`
-    );
-
-    return {
-      success: false,
-      message: '🚫 Reward manipulation detected. Account permanently banned.'
-    };
-  }
-
-  try {
-    await creditHive(
-      userId,
-      reward,
-      'game',
-      `🎮 Mini Game reward (Score: ${score})`
-    );
-  } catch (error) {
-    console.error('Game reward error:', error);
-
-    return {
-      success: false,
-      message: 'Unable to credit game reward'
-    };
-  }
-
-  await createNotification(
-    userId,
-    'reward',
-    '🎮 Game Reward!',
-    `You earned ${reward} 🍯 Hive from the mini game!`
-  );
-
-  return {
-    success: true,
-    message: `+${reward} Hive earned!`
-  };
+  return { success: true, message: `+${reward} Hive earned!` };
 }
 
 export async function getGameHighScore(userId: string): Promise<number> {
